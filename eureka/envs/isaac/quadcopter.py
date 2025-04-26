@@ -303,7 +303,7 @@ class Quadcopter(VecTask):
             ends = starts + 0.1 * self.thrusts.view(self.num_envs, 4, 1) * dirs
 
             verts = torch.stack([starts, ends], dim=2).cpu().numpy()
-            colors = np.zeros((self.num_envs * 4, 3), dtype=np.float32)
+            colors = np.zeros((self.num_envs * 4, 3), dtype=)
             colors[..., 0] = 1.0
             self.gym.clear_lines(self.viewer)
             self.gym.add_lines(self.viewer, None, self.num_envs * 4, verts, colors)
