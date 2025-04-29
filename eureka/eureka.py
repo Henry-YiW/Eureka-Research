@@ -198,7 +198,7 @@ def main(cfg):
                                             stdout=f, stderr=f)
             block_until_training(rl_filepath, log_status=True, iter_num=iter, response_id=response_id)
             rl_runs.append(process)
-        
+        logging.info(f"Sampling {cfg.sample} finished!")
         # Gather RL training results and construct reward reflection
         code_feedbacks = []
         contents = []
@@ -208,9 +208,12 @@ def main(cfg):
         
         exec_success = False 
         for response_id, (code_run, rl_run) in enumerate(zip(code_runs, rl_runs)):
+            logging.info(f"Processing {response_id} of {cfg.sample}!")
             rl_run.communicate()
+            logging.info(f"Processing {response_id} of {cfg.sample} communication finished!")
             rl_filepath = f"env_iter{iter}_response{response_id}.txt"
             code_paths.append(f"env_iter{iter}_response{response_id}.py")
+            logging.info(f"Processing {response_id} of {cfg.sample} finished!")
             try:
                 with open(rl_filepath, 'r') as f:
                     stdout_str = f.read() 
@@ -225,6 +228,7 @@ def main(cfg):
             content = ''
             traceback_msg = filter_traceback(stdout_str)
 
+            logging.info(f"Processing {response_id} of {cfg.sample} finished 2!")
             if traceback_msg == '':
                 # If RL execution has no error, provide policy statistics feedback
                 exec_success = True

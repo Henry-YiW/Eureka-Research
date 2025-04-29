@@ -343,7 +343,7 @@ class AllegroHandGPT(VecTask):
         self.goal_object_indices = to_torch(self.goal_object_indices, dtype=torch.long, device=self.device)
 
     def compute_reward(self, actions):
-        self.rew_buf[:], self.rew_dict = quat_conjugate(self.q)
+        self.rew_buf[:], self.rew_dict = compute_improved_reward(self.object_rot, self.goal_rot)
         self.extras['gpt_reward'] = self.rew_buf.mean()
         for rew_state in self.rew_dict: self.extras[rew_state] = self.rew_dict[rew_state].mean()
         self.rew_buf[:] = compute_bonus(
@@ -703,8 +703,34 @@ import math
 import torch
 from torch import Tensor
 @torch.jit.script
-def quat_conjugate(q: Tensor) -> Tensor:
-    # Conjugate of a quaternion
-    q_conj = q.clone()
-    q_conj[..., 1:] = -q_conj[..., 1:]  # negate xyz components
-    return q_conj
+def compute_improved_reward(object_rot: Tensor, goal_rot: Tensor) -> Tuple[Tensor, Dict[str, Tensor]]:
+    # Normalize the quaternion representations for stable computations
+    object_rot_norm = torch.nn.functional.normalize(object_rot, dim=-1)
+    goal_rot_norm = torch.nn.functional.normalize(goal_rot, dim=-1)
+    
+    # Dot product to assess alignment; clamp for numerical stability for acos
+    alignment = torch.sum(object_rot_norm * goal_rot_norm, dim=-1)
+    alignment = torch.clamp(alignment, -1.0, 1.0)
+    
+    # Rotation cost using acos, shifted to have zero reward at perfect alignment
+    rotation_cost = torch.acos(alignment)
+    
+    # Introducing temperature to create smoother reward response
+    gentle_rotation_temp = 0.1
+    gentle_rotation_reward = torch.exp(-rotation_cost / gentle_rotation_temp)
+    
+    # Scale down the fine alignment reward and raise it to a power for sensitivity at higher alignments
+    power_aligned_reward = torch.pow(alignment, 20.0) * 0.1  # Reducing amplitude and focusing on higher alignments
+    
+    # Combine rewards with adjusted weights
+    total_reward = 0.7 * gentle_rotation_reward + 0.3 * power_aligned_reward
+    
+    # Log the reward components for debugging and tuning
+    reward_components = {
+        "alignment_raw": alignment,
+        "rotation_cost": rotation_cost,
+        "gentle_rotation_reward": gentle_rotation_reward,
+        "power_aligned_reward": power_aligned_reward
+    }
+    
+    return total_reward, reward_components

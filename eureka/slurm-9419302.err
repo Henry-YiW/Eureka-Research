@@ -1,0 +1,3 @@
+slurmstepd: error: *** STEP 9419302.0 ON gpua057 CANCELLED AT 2025-04-27T23:34:18 DUE TO TIME LIMIT ***
+slurmstepd: error: *** JOB 9419302 ON gpua057 CANCELLED AT 2025-04-27T23:34:18 DUE TO TIME LIMIT ***
+srun: Job step aborted: Waiting up to 32 seconds for job step to finish.
