@@ -3,4 +3,4 @@ outputs/
 *.egg-info/
 wandb
 .env
-testing.sh
+**testing.sh
