@@ -4,7 +4,7 @@ from setuptools import setup, find_packages
 INSTALL_REQUIRES = [
     "charset-normalizer",
     "matplotlib",
-    "openai",
+    "openai==0.28.0",
     'torch<=2.0.0',
     'numpy==1.20.0',
     'ray>=1.1.0',
