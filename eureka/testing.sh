@@ -16,7 +16,7 @@
 #SBATCH -o slurm-%j.out
 
 # Set the environment variable
-export OPENAI_API_KEY="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"
+export OPENAI_API_KEY=""
 
 ENVIRONMENT="allegro_hand"
 NUM_ITERATIONS=10
