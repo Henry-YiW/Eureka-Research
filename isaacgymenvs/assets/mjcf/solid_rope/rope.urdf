@@ -1,0 +1,57 @@
+<?xml version="1.0"?>
+<robot name="solid_rope">
+
+  <!-- A base link is often needed, even if empty, to attach the object to -->
+  <link name="base_link"/>
+
+  <!-- Define the main link for the rope body -->
+  <link name="rope_link">
+
+    <!-- Visual Properties -->
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" /> <!-- Position/orientation offset of the visual mesh relative to the link's origin -->
+      <geometry>
+        <!-- Use the mesh file for visuals -->
+        <mesh filename="textured_objects/rope.obj" scale="1.0 1.0 1.0"/>
+      </geometry>
+      <!-- Optional: You could define a simple material here if not using MTL -->
+      <!-- <material name="grey">
+        <color rgba="0.6 0.6 0.6 1.0"/>
+      </material> -->
+    </visual>
+
+    <!-- Collision Properties -->
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" /> <!-- Position/orientation offset of the collision mesh -->
+      <geometry>
+        <!-- Use the same mesh for collision (or a simplified one if needed) -->
+        <mesh filename="textured_objects/rope.obj" scale="1.0 1.0 1.0"/>
+        <!-- Alternatively, use a primitive shape for collision -->
+        <!-- <cylinder radius="0.05" length="1.0"/> -->
+        <!-- <box size="0.1 0.1 1.0"/> -->
+      </geometry>
+    </collision>
+
+    <!-- Inertial Properties (Physics) -->
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/> <!-- Center of mass relative to link origin. Adjust if mesh origin isn't center. -->
+      <mass value="0.5" /> <!-- Mass in kilograms (adjust as needed) -->
+      <!-- Inertia tensor (complex to calculate by hand). -->
+      <!-- These are placeholder values for a small cylinder/box aligned with axes. -->
+      <!-- You might let the simulator estimate, or use values from modeling software if available. -->
+      <inertia ixx="0.01" ixy="0.0" ixz="0.0"
+               iyy="0.01" iyz="0.0"
+               izz="0.001"/>
+    </inertial>
+
+  </link>
+
+  <!-- Define a Joint to attach the rope to the world/base -->
+  <joint name="rope_base_joint" type="fixed">
+    <parent link="base_link"/> <!-- Attach to the base -->
+    <child link="rope_link"/>  <!-- The link being attached -->
+    <origin xyz="0 0 0.5" rpy="0 0 0"/> <!-- Position and orientation of the rope_link relative to base_link -->
+                                       <!-- Adjust xyz to place the rope where you want it -->
+  </joint>
+
+</robot>

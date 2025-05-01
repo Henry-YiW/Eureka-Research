@@ -367,7 +367,7 @@ class ShadowHandGPT(VecTask):
         self.goal_object_indices = to_torch(self.goal_object_indices, dtype=torch.long, device=self.device)
 
     def compute_reward(self, actions):
-        self.rew_buf[:], self.rew_dict = compute_reward(self.object_rot, self.goal_rot, self.fingertip_pos, self.object_pos)
+        self.rew_buf[:], self.rew_dict = compute_reward(self.object_rot, self.goal_rot)
         self.extras['gpt_reward'] = self.rew_buf.mean()
         for rew_state in self.rew_dict: self.extras[rew_state] = self.rew_dict[rew_state].mean()
         self.rew_buf[:] = compute_bonus(
@@ -763,32 +763,33 @@ import math
 import torch
 from torch import Tensor
 @torch.jit.script
-def compute_reward(object_rot: torch.Tensor, goal_rot: torch.Tensor, fingertip_pos: torch.Tensor, object_pos: torch.Tensor) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
-    device = object_rot.device
+def compute_reward(object_rot: torch.Tensor, goal_rot: torch.Tensor) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+    """
+    Computes the reward for aligning the object's rotation to a target rotation.
     
-    # Distance between object rotation and goal rotation
-    object_goal_rot_diff = torch.norm(object_rot - goal_rot, dim=1)
-    
-    # Distance between each fingertip and the object
-    fingertip_object_diff = torch.norm(fingertip_pos - object_pos.unsqueeze(1), dim=2)
-    avg_fingertip_object_diff = fingertip_object_diff.mean(dim=1)
-    
-    # Reward Components
-    rot_reward = -object_goal_rot_diff
-    fingertip_reward = -avg_fingertip_object_diff
-    
-    # Temperature parameters for reward normalization
-    rot_temperature = torch.tensor(1.0).to(device)
-    fingertip_temperature = torch.tensor(1.0).to(device)
-    
-    # Normalize reward components using exponential function
-    rot_reward_normalized = torch.exp(rot_reward / rot_temperature)
-    fingertip_reward_normalized = torch.exp(fingertip_reward / fingertip_temperature)
-    
-    # Combine normalized rewards
-    total_reward = rot_reward_normalized + fingertip_reward_normalized
-    
-    # Store individual reward components in a dictionary
-    reward_dict = {"rot_reward": rot_reward_normalized, "fingertip_reward": fingertip_reward_normalized}
-    
-    return total_reward, reward_dict
+    Parameters:
+    - object_rot (torch.Tensor): The current rotation of the object as a quaternion (w, x, y, z).
+    - goal_rot (torch.Tensor): The goal rotation as a quaternion (w, x, y, z).
+
+    Returns:
+    Tuple containing:
+    - Total reward (torch.Tensor)
+    - A dictionary with detailed components of the reward (Dict[str, torch.Tensor])
+    """
+    # Constants
+    orientation_temp: float = 0.1  # Temperature parameter for the orientation reward
+
+    # Compute quaternion distance using dot product and exponential reward scaling
+    dot_product = torch.sum(object_rot * goal_rot, dim=-1)
+    orientation_error = 1.0 - torch.abs(dot_product)  # Ensure dot_product is within [-1, 1] range
+    orientation_reward = torch.exp(-orientation_temp * orientation_error)
+
+    # Collect the rewards in a dictionary
+    reward_components = {
+        'orientation_reward': orientation_reward
+    }
+
+    # Compute total reward, here it is simple as we have only one component
+    total_reward = orientation_reward
+
+    return total_reward, reward_components

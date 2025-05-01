@@ -1,0 +1,16 @@
+# Define a new material named RopeMaterial
+newmtl RopeMaterial
+# Ambient color (RGB) - How much ambient light it reflects
+Ka 0.6 0.6 0.6
+# Diffuse color (RGB) - The main color under direct light
+Kd 0.6 0.6 0.6
+# Specular color (RGB) - Color of highlights
+Ks 0.1 0.1 0.1
+# Specular exponent (shininess) - Higher means sharper highlights
+Ns 10.0
+# Optical density (not typically used in Isaac Gym)
+Ni 1.0
+# Dissolve (Transparency) - 1.0 is fully opaque
+d 1.0
+# Illumination model (2 = highlight on)
+illum 2
