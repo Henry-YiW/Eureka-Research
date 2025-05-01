@@ -1,0 +1,3 @@
+task: ShadowHandRope
+env_name: shadow_hand_rope
+description: Slide the rigid rope bidirectionally through the hand's fingers. The goal is to achieve a target displacement along the rope's main axis relative to its center, alternating between positive and negative displacement targets (e.g., +0.2 meters and -0.2 meters).

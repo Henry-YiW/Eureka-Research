@@ -69,6 +69,7 @@ from .shadow_hand_scissors import ShadowHandScissors
 from .shadow_hand_swing_cup import ShadowHandSwingCup
 from .shadow_hand_switch import ShadowHandSwitch
 from .shadow_hand_two_catch_underarm import ShadowHandTwoCatchUnderarm
+from .shadow_hand_rope import ShadowHandRope
 
 # Mappings from strings to environments
 isaacgym_task_map = {
@@ -95,6 +96,7 @@ isaacgym_task_map = {
     "ShadowHandSpin": ShadowHandSpin, 
     "ShadowHandUpsideDown": ShadowHandUpsideDown,
     "Trifinger": Trifinger,
+    "ShadowHandRope": ShadowHandRope,
 
     "ShadowHandBlockStack": ShadowHandBlockStack,
     "ShadowHandBottleCap": ShadowHandBottleCap,
