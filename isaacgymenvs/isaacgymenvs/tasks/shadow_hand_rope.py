@@ -186,6 +186,7 @@ class ShadowHandRope(VecTask):
         # self.is_target_positive = torch.ones(self.num_envs, dtype=torch.bool, device=self.device) # Start by targeting positive displacement
         # self.current_target_displacement = torch.full((self.num_envs,), self.target_displacement_positive, dtype=torch.float, device=self.device) # Use local_rope_end_offset instead
         self.local_rope_end_offset = torch.full((self.num_envs, 1), self.target_displacement_positive, dtype=torch.float, device=self.device)
+        self.target_displacement = self.local_rope_end_offset.clone() # Initialize based on local_rope_end_offset for generated reward
 
     def create_sim(self):
         self.sim_params.up_axis = gymapi.UP_AXIS_Z

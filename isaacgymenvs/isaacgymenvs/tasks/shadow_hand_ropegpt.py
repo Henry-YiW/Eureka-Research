@@ -1,4 +1,4 @@
-# Adapted from shadow_hand_spin.py for ShadowHandRope task
+# Adapted from shadow_hand_spin.py for ShadowHandRopeGPT task
 
 import numpy as np
 import os
@@ -14,7 +14,7 @@ from isaacgymenvs.tasks.base.vec_task import VecTask
 # Note: compute_reward function is intentionally left minimal
 # Eureka will generate the specific reward function logic
 
-class ShadowHandRope(VecTask):
+class ShadowHandRopeGPT(VecTask):
 
     def __init__(self, cfg, rl_device, sim_device, graphics_device_id, headless, virtual_screen_capture, force_render):
 
@@ -342,6 +342,9 @@ class ShadowHandRope(VecTask):
         self.rope_rb_masses = to_torch([prop.mass for prop in rope_rb_props], dtype=torch.float, device=self.device)
 
     def compute_reward(self, actions):
+        self.rew_buf[:], self.rew_dict = compute_reward(self.current_palm_displacement, self.target_displacement)
+        self.extras['gpt_reward'] = self.rew_buf.mean()
+        for rew_state in self.rew_dict: self.extras[rew_state] = self.rew_dict[rew_state].mean()
         # --- Get states --- 
         # Ensure observations are computed first (usually done in post_physics_step before calling compute_reward)
         # We need: self.rope_pos, self.rope_rot, self.rigid_body_states
@@ -705,3 +708,22 @@ class ShadowHandRope(VecTask):
 def randomize_rotation(rand0, rand1, x_unit_tensor, y_unit_tensor):
     return quat_mul(quat_from_angle_axis(rand0 * np.pi, x_unit_tensor),
                     quat_from_angle_axis(rand1 * np.pi, y_unit_tensor)) 
+from typing import Tuple, Dict
+import math
+import torch
+from torch import Tensor
+@torch.jit.script
+def compute_reward(current_palm_displacement: torch.Tensor, target_displacement: float) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+    # Temperature parameter for controlling the sharpness of the reward scaling
+    displacement_reward_temp: float = 0.1
+    # Calculate the absolute difference between the current and target displacements
+    displacement_error: torch.Tensor = torch.abs(current_palm_displacement - target_displacement)
+    # Calculate the reward by applying a negative exponential function to the error
+    displacement_reward: torch.Tensor = torch.exp(-displacement_reward_temp * displacement_error)
+    # Total reward is just the displacement reward in this task (no other components are specified)
+    reward: torch.Tensor = displacement_reward
+
+    # Collecting individual reward components in a dictionary to return
+    reward_components: Dict[str, torch.Tensor] = {"displacement_reward": displacement_reward}
+
+    return reward, reward_components

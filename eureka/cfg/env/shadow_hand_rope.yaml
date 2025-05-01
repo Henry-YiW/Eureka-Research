@@ -1,0 +1,3 @@
+task: ShadowHandRope
+env_name: shadow_hand_rope
+description: to make the shadow hand slide along a rope to a target displacement 
