@@ -73,7 +73,7 @@ class ShadowHandRope(VecTask):
         # Paths for shadow hand and the rope
         self.asset_files_dict = {
             "hand": "mjcf/open_ai_assets/hand/shadow_hand.xml",
-            "rope": "mjcf/solid_rope/rope.urdf" # Default path, can be overridden by config
+            "rope": "mjcf/open_ai_assets/hand/rope.xml" # Default path, can be overridden by config
         }
 
         if "asset" in self.cfg["env"]:
@@ -276,13 +276,11 @@ class ShadowHandRope(VecTask):
 
         # Define start poses
         shadow_hand_start_pose = gymapi.Transform()
-        shadow_hand_start_pose.p = gymapi.Vec3(0.0, 0.0, 0.5) # Centered hand
+        shadow_hand_start_pose.p = gymapi.Vec3(0.0, 0.0, 0.5)
 
         rope_start_pose = gymapi.Transform()
-        rope_start_pose.p = shadow_hand_start_pose.p + gymapi.Vec3(0.0, -0.15, 0.10) # Place rope slightly in front and below palm
-        # Initial orientation might need adjustment based on rope URDF
-        rope_start_pose.r = gymapi.Quat.from_euler_zyx(0.0, 0.0, 0.0)
-
+        rope_start_pose.p = shadow_hand_start_pose.p + gymapi.Vec3(0.0, -0.41, 0.15)  # Same as hand
+        rope_start_pose.r = gymapi.Quat(0, 0, 0, 0.5)
         # Compute aggregate size
         max_agg_bodies = self.num_shadow_hand_bodies + rope_rb_count
         max_agg_shapes = self.num_shadow_hand_shapes + self.gym.get_asset_rigid_shape_count(rope_asset)
@@ -317,8 +315,11 @@ class ShadowHandRope(VecTask):
                 self.gym.enable_actor_dof_force_sensors(env_ptr, shadow_hand_actor)
 
             # Add rope actor
-            rope_handle = self.gym.create_actor(env_ptr, rope_asset, rope_start_pose, "rope", i, 0, 0) # Collision group 0
+            rope_handle = self.gym.create_actor(env_ptr, rope_asset, rope_start_pose, "rope", i, 0, 0)
             rope_idx = self.gym.get_actor_index(env_ptr, rope_handle, gymapi.DOMAIN_SIM)
+            
+            # self._create_fixed_joint_between(env_ptr, shadow_hand_actor, rope_handle)
+            
             self.rope_indices.append(rope_idx)
             self.rope_init_state.append([rope_start_pose.p.x, rope_start_pose.p.y, rope_start_pose.p.z,
                                           rope_start_pose.r.x, rope_start_pose.r.y, rope_start_pose.r.z, rope_start_pose.r.w,
@@ -340,6 +341,20 @@ class ShadowHandRope(VecTask):
         # Get rope mass for random force calculation
         rope_rb_props = self.gym.get_actor_rigid_body_properties(env_ptr, rope_handle)
         self.rope_rb_masses = to_torch([prop.mass for prop in rope_rb_props], dtype=torch.float, device=self.device)
+    
+    def _create_fixed_joint_between(self, env_ptr, parent_actor, child_actor):
+        # Get transforms of parent and child roots
+        parent_pose = gymapi.Transform()
+        child_pose = gymapi.Transform()
+
+        self.gym.create_joint(
+            env_ptr,
+            parent_actor,
+            child_actor,
+            gymapi.JointType.JOINT_FIXED,
+            parent_pose,
+            child_pose
+        )
 
     def compute_reward(self, actions):
         # --- Get states --- 

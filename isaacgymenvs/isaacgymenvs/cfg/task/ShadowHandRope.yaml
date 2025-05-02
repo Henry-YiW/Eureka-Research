@@ -5,7 +5,7 @@ physics_engine: ${..physics_engine}
 
 # if given, will override the device setting in gym.
 env: 
-  numEnvs: ${resolve_default:16384,${...num_envs}}
+  numEnvs: ${resolve_default:10,${...num_envs}}
   envSpacing: 0.75
   episodeLength: 600 # Adjust as needed for the rope task
   enableDebugVis: False
@@ -56,7 +56,8 @@ env:
   asset:
     assetFileName: "mjcf/open_ai_assets/hand/shadow_hand.xml"
     # Removed block/egg/pen defaults, added rope
-    assetFileNameRope: "mjcf/solid_rope/rope.urdf" 
+    # assetFileNameRope: "mjcf/solid_rope/rope.urdf" 
+    assetFileNameRope: "mjcf/open_ai_assets/hand/rope.xml" 
 
   # set to True if you use camera sensors in the environment
   enableCameraSensors: False

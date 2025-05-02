@@ -9,10 +9,12 @@
 
     <!-- Visual Properties -->
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" /> <!-- Position/orientation offset of the visual mesh relative to the link's origin -->
+      <!-- Keep visual origin at the base of the mesh (z=0) -->
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <!-- Use the mesh file for visuals -->
-        <mesh filename="textured_objects/rope.obj" scale="1.0 1.0 1.0"/>
+        <!-- Scale X and Y to make it thinner (e.g., half the original radius) -->
+        <mesh filename="textured_objects/rope.obj" scale="0.5 0.5 1.0"/>
       </geometry>
       <!-- Optional: You could define a simple material here if not using MTL -->
       <!-- <material name="grey">
@@ -22,26 +24,27 @@
 
     <!-- Collision Properties -->
     <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" /> <!-- Position/orientation offset of the collision mesh -->
+      <!-- Center the collision primitive at the mesh's geometric center (z=0.5) -->
+      <origin xyz="0 0 0.5" rpy="0 0 0" />
       <geometry>
-        <!-- Use the same mesh for collision (or a simplified one if needed) -->
-        <mesh filename="textured_objects/rope.obj" scale="1.0 1.0 1.0"/>
-        <!-- Alternatively, use a primitive shape for collision -->
-        <!-- <cylinder radius="0.05" length="1.0"/> -->
-        <!-- <box size="0.1 0.1 1.0"/> -->
+        <!-- Replace mesh collision with a cylinder primitive -->
+        <!-- Reduce radius to match visual scaling (original was 0.02) -->
+        <cylinder radius="0.01" length="1.0"/>
       </geometry>
     </collision>
 
     <!-- Inertial Properties (Physics) -->
     <inertial>
-      <origin xyz="0 0 0" rpy="0 0 0"/> <!-- Center of mass relative to link origin. Adjust if mesh origin isn't center. -->
-      <mass value="0.5" /> <!-- Mass in kilograms (adjust as needed) -->
-      <!-- Inertia tensor (complex to calculate by hand). -->
-      <!-- These are placeholder values for a small cylinder/box aligned with axes. -->
-      <!-- You might let the simulator estimate, or use values from modeling software if available. -->
-      <inertia ixx="0.01" ixy="0.0" ixz="0.0"
-               iyy="0.01" iyz="0.0"
-               izz="0.001"/>
+      <!-- Center of mass should align with the collision primitive's center -->
+      <origin xyz="0 0 0.5" rpy="0 0 0"/>
+      <!-- Reduce mass slightly due to reduced volume, or keep it if desired -->
+      <mass value="0.25" />
+      <!-- Remove explicit inertia tensor - let the simulator calculate it -->
+      <!-- <inertia ixx="0.01" ixy="0.0" ixz="0.0" -->
+      <!--          iyy="0.01" iyz="0.0" -->
+      <!--          izz="0.001"/> -->
+      <!-- Placeholder for simulator calculation (syntax might vary slightly by parser, but often omitting works) -->
+       <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001" /> <!-- Provide minimal values if needed -->
     </inertial>
 
   </link>
@@ -50,8 +53,9 @@
   <joint name="rope_base_joint" type="fixed">
     <parent link="base_link"/> <!-- Attach to the base -->
     <child link="rope_link"/>  <!-- The link being attached -->
-    <origin xyz="0 0 0.5" rpy="0 0 0"/> <!-- Position and orientation of the rope_link relative to base_link -->
-                                       <!-- Adjust xyz to place the rope where you want it -->
+    <!-- Place the link's origin (base of the mesh) relative to the base_link -->
+    <!-- Let's keep it at 0,0,0 relative to base_link for simplicity -->
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
 
 </robot>

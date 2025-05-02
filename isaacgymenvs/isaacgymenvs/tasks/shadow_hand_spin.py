@@ -90,7 +90,8 @@ class ShadowHandSpin(VecTask):
         self.asset_files_dict = {
             "block": "urdf/objects/cube_multicolor.urdf",
             "egg": "mjcf/open_ai_assets/hand/egg.xml",
-            "pen": "mjcf/open_ai_assets/hand/pen.xml"
+            "pen": "mjcf/open_ai_assets/hand/pen.xml",
+            "rope": "mjcf/solid_rope/rope.urdf"
         }
 
         if "asset" in self.cfg["env"]:

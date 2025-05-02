@@ -74,7 +74,7 @@ def preprocess_train_config(cfg, config_dict):
 
 @hydra.main(config_name="config", config_path="./cfg")
 def launch_rlg_hydra(cfg: DictConfig):
-
+    # print('cfg', cfg)
     from isaacgymenvs.utils.rlgames_utils import RLGPUEnv, RLGPUAlgoObserver, MultiObserver, ComplexObsRLGPUEnv
     from isaacgymenvs.utils.wandb_utils import WandbAlgoObserver
     from rl_games.common import env_configurations, vecenv

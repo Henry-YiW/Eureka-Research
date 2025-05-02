@@ -1,35 +1,55 @@
-# Reference the material library file
 mtllib rope.mtl
-
-# --- Vertices (x y z) ---
-# Define the points in 3D space that make up the shape
-v 0.0 0.0 0.0
-v 1.0 0.0 0.0
-v 1.0 1.0 0.0
-v 0.0 1.0 0.0
-# ... many more vertices for a cylinder ...
-
-# --- Texture Coordinates (u v) --- (Optional but good practice)
-# Maps vertices to texture space (if you were using a texture image)
-vt 0.0 0.0
-vt 1.0 0.0
-vt 1.0 1.0
-vt 0.0 1.0
-# ...
-
-# --- Vertex Normals (nx ny nz) ---
-# Defines the direction light reflects off each vertex (for shading)
-vn 0.0 0.0 1.0
-vn 0.0 0.0 1.0
-# ... many more normals ...
-
-# --- Material Selection ---
-# Use the material defined in the .mtl file
+o RigidRope
 usemtl RopeMaterial
 
-# --- Faces ---
-# Defines the surfaces by connecting vertices (v), texture coords (vt), and normals (vn)
-# Format: f v1/vt1/vn1 v2/vt2/vn2 v3/vt3/vn3  (for a triangle)
-f 1/1/1 2/2/1 3/3/1
-f 1/1/1 3/3/1 4/4/1
-# ... many more faces ...
+# Vertices
+v 0.02 0.0 0.0
+v 0.0141 0.0141 0.0
+v 0.0 0.02 0.0
+v -0.0141 0.0141 0.0
+v -0.02 0.0 0.0
+v -0.0141 -0.0141 0.0
+v 0.0 -0.02 0.0
+v 0.0141 -0.0141 0.0
+
+v 0.02 0.0 1.0
+v 0.0141 0.0141 1.0
+v 0.0 0.02 1.0
+v -0.0141 0.0141 1.0
+v -0.02 0.0 1.0
+v -0.0141 -0.0141 1.0
+v 0.0 -0.02 1.0
+v 0.0141 -0.0141 1.0
+
+# Faces (side walls)
+f 1 2 10
+f 1 10 9
+f 2 3 11
+f 2 11 10
+f 3 4 12
+f 3 12 11
+f 4 5 13
+f 4 13 12
+f 5 6 14
+f 5 14 13
+f 6 7 15
+f 6 15 14
+f 7 8 16
+f 7 16 15
+f 8 1 9
+f 8 9 16
+
+# Caps (optional for top/bottom sealing)
+f 1 2 3
+f 1 3 4
+f 1 4 5
+f 1 5 6
+f 1 6 7
+f 1 7 8
+
+f 9 10 11
+f 9 11 12
+f 9 12 13
+f 9 13 14
+f 9 14 15
+f 9 15 16

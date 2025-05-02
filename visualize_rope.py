@@ -1,9 +1,6 @@
-import isaacgym
-from isaacgym import gymapi
-import isaacgymenvs
-import torch
-import numpy as np
 import os
+import time
+from isaacgym import gymapi
 
 # Initialize Gym
 gym = gymapi.acquire_gym()
@@ -15,103 +12,85 @@ sim_params.substeps = 2
 sim_params.up_axis = gymapi.UP_AXIS_Z
 sim_params.gravity = gymapi.Vec3(0.0, 0.0, -9.81)
 
-# Use PhysX
+# Use PhysX backend
+# sim_params.physics_engine = gymapi.SIM_PHYSX
+sim_params.physx.use_gpu = True
 sim_params.physx.solver_type = 1
 sim_params.physx.num_position_iterations = 4
 sim_params.physx.num_velocity_iterations = 1
 sim_params.physx.contact_offset = 0.01
 sim_params.physx.rest_offset = 0.0
-sim_params.physx.friction_offset_threshold = 0.01
-sim_params.physx.friction_correlation_distance = 0.005
-sim_params.physx.use_gpu = True # Make sure GPU is available
+sim_params.physx.max_depenetration_velocity = 1.0
 
-sim = gym.create_sim(0, 0, gymapi.SIM_PHYSX, sim_params) # compute_device_id=0, graphics_device_id=0
-
+# Create simulation
+sim = gym.create_sim(0, 0, gymapi.SIM_PHYSX, sim_params)
 if sim is None:
-    print("*** Failed to create sim")
-    quit()
+    raise Exception("Failed to create sim")
 
-# Add ground plane
-plane_params = gymapi.PlaneParams()
-plane_params.normal = gymapi.Vec3(0, 0, 1) # z-up
-plane_params.distance = 0
-plane_params.static_friction = 0.5
-plane_params.dynamic_friction = 0.5
-plane_params.restitution = 0
-gym.add_ground(sim, plane_params)
-
-# --- Asset Loading ---
-asset_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "isaacgymenvs/assets/mjcf/solid_rope")
-asset_file = "rope.urdf" # Assuming your URDF file is named rope.urdf
-
-if not os.path.exists(os.path.join(asset_root, asset_file)):
-    print(f"*** Error: Asset file not found at {os.path.join(asset_root, asset_file)}")
-    quit()
-
-asset_options = gymapi.AssetOptions()
-asset_options.fix_base_link = False # Keep it false to see if gravity affects it, set true to fix it
-asset_options.disable_gravity = False
-# asset_options.use_mesh_materials = True # Uncomment if you want to use materials defined in the mesh files (e.g., MTL)
-
-print(f"Loading asset '{asset_file}' from '{asset_root}'")
-rope_asset = gym.load_asset(sim, asset_root, asset_file, asset_options)
-
-if rope_asset is None:
-    print("*** Failed to load asset")
-    quit()
-
-# --- Environment Setup ---
-num_envs = 1
-envs_per_row = 1
-env_spacing = 1.0
-env_lower = gymapi.Vec3(-env_spacing, -env_spacing, 0.0)
-env_upper = gymapi.Vec3(env_spacing, env_spacing, env_spacing)
-
-# Actor initial pose
-pose = gymapi.Transform()
-pose.p = gymapi.Vec3(0.0, 0.0, 1.0) # Initial position (1m above ground)
-pose.r = gymapi.Quat(0.0, 0.0, 0.0, 1.0) # Initial orientation
-
-envs = []
-actor_handles = []
-
-print(f"Creating {num_envs} environments")
-for i in range(num_envs):
-    # create env
-    env = gym.create_env(sim, env_lower, env_upper, envs_per_row)
-    envs.append(env)
-
-    # add actor
-    actor_handle = gym.create_actor(env, rope_asset, pose, "rope", i, 0, 0) # collision group 0, segmentation id 0
-    actor_handles.append(actor_handle)
-
-# --- Viewer Setup ---
+# Create viewer
 viewer = gym.create_viewer(sim, gymapi.CameraProperties())
 if viewer is None:
-    print("*** Failed to create viewer")
-    quit()
+    raise Exception("Failed to create viewer")
 
-# Point camera at the environment
-cam_target = gymapi.Vec3(0.0, 0.0, 0.5)
-cam_pos = gymapi.Vec3(2.0, 2.0, 2.0)
+# Set camera position and look-at
+# cam_pos = gymapi.Vec3(0.25, -0.8, 1.05)
+# cam_target = gymapi.Vec3(-0.05, -0.2, 0)
+# gym.viewer_camera_look_at(viewer, None, cam_pos, cam_target)
+cam_pos = gymapi.Vec3(1.0, 1.0, 1.0)
+cam_target = gymapi.Vec3(0.8, 1.25, 0.2)  # the rope's world position
 gym.viewer_camera_look_at(viewer, None, cam_pos, cam_target)
 
-# --- Simulation Loop ---
-print("Running simulation... Press Esc to exit.")
-while not gym.query_viewer_has_closed(viewer):
+# cam_pos = gymapi.Vec3(0.0, 0.0, 1.5)        # camera above the Z shape
+# cam_target = gymapi.Vec3(0.0, 0.0, 0.2)      # look at the rope's base height
+# gym.viewer_camera_look_at(viewer, None, cam_pos, cam_target)
 
-    # Step the physics
+
+
+# Create ground
+plane_params = gymapi.PlaneParams()
+plane_params.normal = gymapi.Vec3(0.0, 0.0, 1.0)
+gym.add_ground(sim, plane_params)
+
+# Set asset root directory
+asset_root = os.path.abspath("isaacgymenvs/assets")  # Change as needed
+hand_file = "mjcf/open_ai_assets/hand/shadow_hand.xml"
+rope_file = "mjcf/open_ai_assets/hand/rope.xml"
+
+# Asset loading options
+asset_opts = gymapi.AssetOptions()
+asset_opts.fix_base_link = True
+asset_opts.disable_gravity = True
+asset_opts.armature = 0.01
+asset_opts.thickness = 0.001
+asset_opts.default_dof_drive_mode = gymapi.DOF_MODE_NONE
+
+# Load assets
+hand_asset = gym.load_asset(sim, asset_root, hand_file, asset_opts)
+rope_asset = gym.load_asset(sim, asset_root, rope_file, asset_opts)
+
+# Create environment
+env_spacing = 1.5
+env_lower = gymapi.Vec3(-env_spacing, -env_spacing, 0.0)
+env_upper = gymapi.Vec3(env_spacing, env_spacing, env_spacing)
+env = gym.create_env(sim, env_lower, env_upper, 1)
+
+# Create actors
+hand_pose = gymapi.Transform()
+hand_pose.p = gymapi.Vec3(0.5, 0.0, 0.0)
+gym.create_actor(env, hand_asset, hand_pose, "shadow_hand", 0, 1)
+
+rope_pose = gymapi.Transform()
+rope_pose.p = gymapi.Vec3(0.0, 0.0, 0.1)
+gym.create_actor(env, rope_asset, rope_pose, "rigid_rope", 0, 2)
+
+# Run simulation loop
+while not gym.query_viewer_has_closed(viewer):
     gym.simulate(sim)
     gym.fetch_results(sim, True)
-
-    # Step rendering
     gym.step_graphics(sim)
     gym.draw_viewer(viewer, sim, True)
-
-    # Wait for dt
-    gym.sync_frame_time(sim)
-
-print("Simulation finished.")
+    
+    time.sleep(1.0 / 60.0)
 
 gym.destroy_viewer(viewer)
-gym.destroy_sim(sim) 
+gym.destroy_sim(sim)
