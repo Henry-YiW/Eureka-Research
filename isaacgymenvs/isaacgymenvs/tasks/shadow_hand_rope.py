@@ -363,6 +363,8 @@ class ShadowHandRope(VecTask):
         displacement_error = torch.abs(current_displacement - self.local_rope_end_offset.squeeze(-1))
         # Use exponential reward: higher reward for smaller error
         dist_rew = torch.exp(-self.dist_reward_scale * displacement_error)
+        # Print displacement error (loss) - Mean over envs
+        print(f"Mean Displacement Error: {displacement_error.mean().item():.4f}")
 
         # --- Check if target displacement is reached ---
         reached_target = (displacement_error < self.success_tolerance)
@@ -386,6 +388,10 @@ class ShadowHandRope(VecTask):
 
         # --- Combine reward components ---
         self.rew_buf[:] = dist_rew - action_penalty + (reached_target * self.reach_goal_bonus) + fall_penalty_reward
+
+        # *** Print total reward (mean over envs) ***
+        print(f"Mean Total Reward: {self.rew_buf.mean().item():.4f}")
+        # *** End Print ***
 
         # --- Determine resets ---
         # Reset if falling or max episode length reached
