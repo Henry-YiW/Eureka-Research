@@ -66,7 +66,14 @@ asset_opts.default_dof_drive_mode = gymapi.DOF_MODE_NONE
 
 # Load assets
 hand_asset = gym.load_asset(sim, asset_root, hand_file, asset_opts)
-rope_asset = gym.load_asset(sim, asset_root, rope_file, asset_opts)
+
+# Define separate options for the rope
+rope_asset_options = gymapi.AssetOptions()
+rope_asset_options.fix_base_link = True
+# Copy other relevant options if needed, or keep them default
+# e.g., rope_asset_options.disable_gravity = False # If you want gravity on a fixed rope (may not make sense)
+
+rope_asset = gym.load_asset(sim, asset_root, rope_file, rope_asset_options)
 
 # Create environment
 env_spacing = 1.5
@@ -76,7 +83,7 @@ env = gym.create_env(sim, env_lower, env_upper, 1)
 
 # Create actors
 hand_pose = gymapi.Transform()
-hand_pose.p = gymapi.Vec3(0.5, 0.0, 0.0)
+hand_pose.p = gymapi.Vec3(0.5, 0.0, 0.1)
 gym.create_actor(env, hand_asset, hand_pose, "shadow_hand", 0, 1)
 
 rope_pose = gymapi.Transform()

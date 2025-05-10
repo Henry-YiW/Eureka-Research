@@ -4,7 +4,7 @@ env:
   aggregateMode: 1
   asset:
     assetFileName: mjcf/open_ai_assets/hand/shadow_hand.xml
-    assetFileNameRope: mjcf/solid_rope/rope.urdf
+    assetFileNameRope: mjcf/open_ai_assets/hand/rope.xml
   asymmetric_observations: false
   clipActions: 1.0
   clipObservations: 5.0
@@ -26,7 +26,7 @@ env:
   - 0.1
   forceScale: 0.0
   maxConsecutiveSuccesses: 0
-  numEnvs: ${resolve_default:16384,${...num_envs}}
+  numEnvs: ${resolve_default:10,${...num_envs}}
   objectType: rope
   observationType: full_state
   printNumSuccesses: false
