@@ -11,7 +11,7 @@ from isaacgymenvs.utils.torch_jit_utils import *
 from isaacgymenvs.tasks.base.vec_task import VecTask
 
 
-class ShadowHandGPT(VecTask):
+class ShadowHandSpinGPT(VecTask):
 
     def __init__(self, cfg, rl_device, sim_device, graphics_device_id, headless, virtual_screen_capture, force_render):
 
@@ -113,8 +113,6 @@ class ShadowHandGPT(VecTask):
             print("New episode length: ", self.max_episode_length)
 
         if self.viewer != None:
-            # cam_pos = gymapi.Vec3(10.0, 5.0, 1.0)
-            # cam_target = gymapi.Vec3(6.0, 5.0, 0.0)
             cam_pos = gymapi.Vec3(0.25, -0.8, 1.05)
             cam_target = gymapi.Vec3(-0.05, -0.2, 0)
             self.gym.viewer_camera_look_at(self.viewer, None, cam_pos, cam_target)
@@ -330,6 +328,7 @@ class ShadowHandGPT(VecTask):
             self.object_init_state.append([object_start_pose.p.x, object_start_pose.p.y, object_start_pose.p.z,
                                            object_start_pose.r.x, object_start_pose.r.y, object_start_pose.r.z, object_start_pose.r.w,
                                            0, 0, 0, 0, 0, 0])
+
             object_idx = self.gym.get_actor_index(env_ptr, object_handle, gymapi.DOMAIN_SIM)
             self.object_indices.append(object_idx)
 
@@ -354,7 +353,10 @@ class ShadowHandGPT(VecTask):
 
         self.object_init_state = to_torch(self.object_init_state, device=self.device, dtype=torch.float).view(self.num_envs, 13)
         self.goal_states = self.object_init_state.clone()
+
         self.goal_states[:, self.up_axis_idx] -= 0.04
+
+        self.goal_states[:, 3] = -0.8
         self.goal_init_state = self.goal_states.clone()
         self.hand_start_states = to_torch(self.hand_start_states, device=self.device).view(self.num_envs, 13)
 
@@ -367,7 +369,7 @@ class ShadowHandGPT(VecTask):
         self.goal_object_indices = to_torch(self.goal_object_indices, dtype=torch.long, device=self.device)
 
     def compute_reward(self, actions):
-        self.rew_buf[:], self.rew_dict = compute_reward(self.object_rot, self.goal_rot)
+        self.rew_buf[:], self.rew_dict = compute_reward(self.object_rot, self.goal_rot, self.object_angvel)
         self.extras['gpt_reward'] = self.rew_buf.mean()
         for rew_state in self.rew_dict: self.extras[rew_state] = self.rew_dict[rew_state].mean()
         self.rew_buf[:] = compute_bonus(
@@ -377,6 +379,7 @@ class ShadowHandGPT(VecTask):
             self.success_tolerance, self.reach_goal_bonus, self.fall_dist, self.fall_penalty,
             self.max_consecutive_successes, self.av_factor, (self.object_type == "pen")
         )
+        
         self.gt_rew_buf, self.reset_buf[:], self.reset_goal_buf[:], self.progress_buf[:], self.successes[:], self.consecutive_successes[:] = compute_success(
             self.rew_buf, self.reset_buf, self.reset_goal_buf, self.progress_buf, self.successes, self.consecutive_successes,
             self.max_episode_length, self.object_pos, self.object_rot, self.goal_pos, self.goal_rot,
@@ -532,12 +535,18 @@ class ShadowHandGPT(VecTask):
             self.obs_buf[:, obs_end:obs_end + self.num_actions] = self.actions
 
     def reset_target_pose(self, env_ids, apply_reset=False):
-        rand_floats = torch_rand_float(-1.0, 1.0, (len(env_ids), 4), device=self.device)
+        current_rotations = self.goal_states[env_ids, 3:7] # Replace this line with the actual tensor
 
-        new_rot = randomize_rotation(rand_floats[:, 0], rand_floats[:, 1], self.x_unit_tensor[env_ids], self.y_unit_tensor[env_ids])
+        angle_degree = 30
+        angle_radian = np.deg2rad(angle_degree)
+
+        z_unit_tensor = torch.tensor([[0.0, 1.0, 0.0]] * len(env_ids), device=current_rotations.device)
+        rotation_increment = quat_from_angle_axis(torch.tensor([angle_radian]*len(env_ids), device=current_rotations.device), z_unit_tensor)
+
+        new_rot = quat_mul(current_rotations, rotation_increment)
 
         self.goal_states[env_ids, 0:3] = self.goal_init_state[env_ids, 0:3]
-        self.goal_states[env_ids, 3:7] = new_rot
+        self.goal_states[env_ids, 3:7] = new_rot.float()
         self.root_state_tensor[self.goal_object_indices[env_ids], 0:3] = self.goal_states[env_ids, 0:3] + self.goal_displacement_tensor
         self.root_state_tensor[self.goal_object_indices[env_ids], 3:7] = self.goal_states[env_ids, 3:7]
         self.root_state_tensor[self.goal_object_indices[env_ids], 7:13] = torch.zeros_like(self.root_state_tensor[self.goal_object_indices[env_ids], 7:13])
@@ -688,6 +697,27 @@ def randomize_rotation_pen(rand0, rand1, max_angle, x_unit_tensor, y_unit_tensor
     return rot
 
 
+@torch.jit.script
+def compute_bonus(
+    rew_buf, reset_buf, reset_goal_buf, progress_buf, successes, consecutive_successes,
+    max_episode_length: float, object_pos, object_rot, target_pos, target_rot,
+    dist_reward_scale: float, rot_reward_scale: float, rot_eps: float,
+    actions, action_penalty_scale: float,
+    success_tolerance: float, reach_goal_bonus: float, fall_dist: float,
+    fall_penalty: float, max_consecutive_successes: int, av_factor: float, ignore_z_rot: bool
+):
+    if ignore_z_rot:
+        success_tolerance = 2.0 * success_tolerance
+
+    quat_diff = quat_mul(object_rot, quat_conjugate(target_rot))
+    rot_dist = 2.0 * torch.asin(torch.clamp(torch.norm(quat_diff[:, 0:3], p=2, dim=-1), max=1.0))
+
+    goal_resets = torch.where(torch.abs(rot_dist) <= success_tolerance, torch.ones_like(reset_goal_buf), reset_goal_buf)
+    successes = successes + goal_resets
+
+    reward = torch.where(goal_resets == 1, rew_buf + reach_goal_bonus, rew_buf)
+
+    return reward
 
 @torch.jit.script
 def compute_success(
@@ -736,51 +766,45 @@ def compute_success(
 
     return reward, resets, goal_resets, progress_buf, successes, cons_successes
 
-@torch.jit.script
-def compute_bonus(
-    rew_buf, reset_buf, reset_goal_buf, progress_buf, successes, consecutive_successes,
-    max_episode_length: float, object_pos, object_rot, target_pos, target_rot,
-    dist_reward_scale: float, rot_reward_scale: float, rot_eps: float,
-    actions, action_penalty_scale: float,
-    success_tolerance: float, reach_goal_bonus: float, fall_dist: float,
-    fall_penalty: float, max_consecutive_successes: int, av_factor: float, ignore_z_rot: bool
-):
-    if ignore_z_rot:
-        success_tolerance = 2.0 * success_tolerance
-
-    quat_diff = quat_mul(object_rot, quat_conjugate(target_rot))
-    rot_dist = 2.0 * torch.asin(torch.clamp(torch.norm(quat_diff[:, 0:3], p=2, dim=-1), max=1.0))
-
-    goal_resets = torch.where(torch.abs(rot_dist) <= success_tolerance, torch.ones_like(reset_goal_buf), reset_goal_buf)
-    successes = successes + goal_resets
-
-    reward = torch.where(goal_resets == 1, rew_buf + reach_goal_bonus, rew_buf)
-
-    return reward
-
 from typing import Tuple, Dict
 import math
 import torch
 from torch import Tensor
 @torch.jit.script
-def compute_reward(object_rot: Tensor, goal_rot: Tensor) -> Tuple[Tensor, Dict[str, Tensor]]:
-    # Increased sensitivity and adjusted the temperature parameter for orientation similarity
-    orientation_similarity_temperature: float = 0.01  # Increased sensitivity
+def compute_reward(object_rot: Tensor, goal_rot: Tensor, object_angvel: Tensor) -> Tuple[Tensor, Dict[str, Tensor]]:
+    """
+    Computes the reward for spinning the pen to the target orientation.
 
-    # Calculate quaternion dot product to measure the similarity between rotations
-    similarity = torch.sum(object_rot * goal_rot, dim=-1)
-    similarity = torch.abs(similarity)  # Handling the double-cover nature of quaternions
-    
-    # Utilize a sharper exponential function based on feedback that previous scale was not rewarding enough differentiation
-    orientation_reward = torch.exp((similarity - 1.0) / orientation_similarity_temperature)
+    Args:
+    - object_rot (Tensor): Current orientation quaternion of the object [w, x, y, z].
+    - goal_rot (Tensor): Target orientation quaternion of the object [w, x, y, z].
+    - object_angvel (Tensor): Current angular velocity of the object.
 
-    # Maintain the bonus reward for high similarity achievement
-    similarity_threshold: float = 0.98
-    bonus_reward = torch.zeros_like(similarity)
-    bonus_indices = similarity > similarity_threshold
-    bonus_reward[bonus_indices] = 2.0  # Increased bonus reward to signify clear success
+    Returns:
+    - Total reward (Tensor),
+    - Individual reward components (Dict[str, Tensor]).
+    """
+    # Temperature constants for reward exponential transforms
+    orientation_temp: float = 0.1
+    ang_vel_temp: float = 0.05
 
-    total_reward = orientation_reward + bonus_reward
-    reward_components = {"orientation_reward": orientation_reward, "bonus_reward": bonus_reward}
-    
+    # Reward for orientation accuracy
+    # Quaternion distance can be calculated as 1 - dot product of the normalized quaternions
+    quat_dot = torch.sum(object_rot * goal_rot, dim=-1)  # assuming quaternions are normalized
+    orientation_accuracy = torch.abs(quat_dot)  # Closer to 1 is better
+    orientation_reward = torch.exp((orientation_accuracy - 1.0) / orientation_temp)
+
+    # Reward for angular velocity being low to prevent wobbling
+    ang_vel_penalty = torch.norm(object_angvel, dim=-1)
+    angular_velocity_reward = torch.exp(-ang_vel_penalty / ang_vel_temp)
+
+    # Combined reward
+    total_reward = orientation_reward + angular_velocity_reward
+
+    # Dictionary of reward components
+    reward_components = {
+        "orientation_reward": orientation_reward,
+        "angular_velocity_reward": angular_velocity_reward
+    }
+
     return total_reward, reward_components

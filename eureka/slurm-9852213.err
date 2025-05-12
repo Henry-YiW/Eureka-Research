@@ -1,0 +1,2 @@
+/scratch/bdes/haorany7/anaconda3/envs/eureka/lib/python3.8/site-packages/numpy/lib/function_base.py:2699: RuntimeWarning: invalid value encountered in subtract
+  X -= avg[:, None]

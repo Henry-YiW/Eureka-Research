@@ -116,6 +116,7 @@ def get_rlgames_env_creator(
             module = importlib.import_module(module_name)
             task_caller = getattr(module, task_name)
         except:
+            print("isaacgym_task_map", isaacgym_task_map)
             task_caller = isaacgym_task_map[task_name]
         
         env = task_caller(

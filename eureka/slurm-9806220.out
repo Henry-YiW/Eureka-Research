@@ -1,0 +1,33 @@
+[2025-05-10 04:27:34,890][root][INFO] - Workspace: /scratch/bdes/haorany7/Eureka-Research/eureka/outputs/eureka/2025-05-10_04-27-34
+[2025-05-10 04:27:34,890][root][INFO] - Project Root: /scratch/bdes/haorany7/Eureka-Research/eureka
+[2025-05-10 04:27:34,891][root][INFO] - Using LLM: gpt-4-turbo
+[2025-05-10 04:27:34,891][root][INFO] - Task: ShadowHandRope
+[2025-05-10 04:27:34,891][root][INFO] - Task description: to make the shadow hand slide along a rope to a target displacement
+[2025-05-10 04:27:35,396][root][INFO] - Iteration 0: Generating 6 samples with gpt-4-turbo
+[2025-05-10 04:28:03,305][root][INFO] - Iteration 0: Prompt Tokens: 1600, Completion Tokens: 3199, Total Tokens: 6399
+[2025-05-10 04:28:03,305][root][INFO] - Iteration 0: Processing Code Run 0
+[2025-05-10 04:36:03,076][root][INFO] - Iteration 0: Code Run 0 execution error!
+[2025-05-10 04:36:03,076][root][INFO] - Iteration 0: Processing Code Run 1
+[2025-05-10 04:36:14,302][root][INFO] - Iteration 0: Code Run 1 execution error!
+[2025-05-10 04:36:14,303][root][INFO] - Iteration 0: Processing Code Run 2
+[2025-05-10 04:36:31,956][root][INFO] - Iteration 0: Code Run 2 successfully training!
+[2025-05-10 04:36:31,956][root][INFO] - Iteration 0: Processing Code Run 3
+[2025-05-10 04:36:42,165][root][INFO] - Iteration 0: Code Run 3 execution error!
+[2025-05-10 04:36:42,165][root][INFO] - Iteration 0: Processing Code Run 4
+[2025-05-10 04:36:51,670][root][INFO] - Iteration 0: Code Run 4 execution error!
+[2025-05-10 04:36:51,670][root][INFO] - Iteration 0: Processing Code Run 5
+[2025-05-10 04:37:00,822][root][INFO] - Iteration 0: Code Run 5 execution error!
+[2025-05-10 04:37:00,822][root][INFO] - Sampling 6 finished!
+[2025-05-10 04:37:00,822][root][INFO] - Processing 0 of 6!
+[2025-05-10 04:37:00,822][root][INFO] - Processing 0 of 6 communication finished!
+[2025-05-10 04:37:00,822][root][INFO] - Processing 0 of 6 finished!
+[2025-05-10 04:37:00,823][root][INFO] - Processing 0 of 6 finished 2!
+[2025-05-10 04:37:00,823][root][INFO] - Processing 1 of 6!
+[2025-05-10 04:37:00,823][root][INFO] - Processing 1 of 6 communication finished!
+[2025-05-10 04:37:00,823][root][INFO] - Processing 1 of 6 finished!
+[2025-05-10 04:37:00,824][root][INFO] - Processing 1 of 6 finished 2!
+[2025-05-10 04:37:00,824][root][INFO] - Processing 2 of 6!
+[2025-05-10 04:43:00,951][root][INFO] - Processing 2 of 6 communication finished!
+[2025-05-10 04:43:00,952][root][INFO] - Processing 2 of 6 finished!
+[2025-05-10 04:43:00,962][root][INFO] - Processing 2 of 6 finished 2!
+[2025-05-10 04:43:03,339][tensorboard][INFO] - No path found after /scratch/bdes/haorany7/Eureka-Research/eureka/outputs/eureka/2025-05-10_04-27-34/policy-2025-05-10_04-36-18/runs/ShadowHandRopeGPT-2025-05-10_04-36-19/summaries/events.out.tfevents.1746869781.gpua004.delta.ncsa.illinois.edu

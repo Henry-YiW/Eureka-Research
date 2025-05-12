@@ -357,7 +357,7 @@ class ShadowHandRopeGPT(VecTask):
         )
 
     def compute_reward(self, actions):
-        self.rew_buf[:], self.rew_dict = compute_reward(self.current_palm_displacement, self.target_displacement)
+        self.rew_buf[:], self.rew_dict = compute_reward(self.current_palm_displacement, self.local_rope_end_offset)
         self.extras['gpt_reward'] = self.rew_buf.mean()
         for rew_state in self.rew_dict: self.extras[rew_state] = self.rew_dict[rew_state].mean()
         self.rew_buf[:], self.rew_dict = compute_reward(self.current_palm_displacement, self.target_displacement)
@@ -761,21 +761,22 @@ import math
 import torch
 from torch import Tensor
 @torch.jit.script
-def compute_reward(current_palm_displacement: Tensor, target_displacement: Tensor) -> Tuple[Tensor, Dict[str, Tensor]]:
-    # Distance Temperature parameter for scaling the exponential
-    displacement_temp: float = 0.1
+def compute_reward(current_palm_displacement: Tensor, local_rope_end_offset: Tensor) -> Tuple[Tensor, Dict[str, Tensor]]:
+    # Temperature parameters for exponential transformation of the distance error component
+    distance_error_temp: float = 0.1
 
-    # Calculate the negative squared difference between current palm displacement and the target displacement
-    displacement_error: Tensor = current_palm_displacement - target_displacement
-    squared_error: Tensor = displacement_error.pow(2)
+    # Negative exponential of the absolute error between current displacement and the target displacement.
+    # This component will approach 1 as the error approaches 0, providing a dense reward for being close to the target.
+    distance_error: Tensor = -torch.abs(current_palm_displacement - local_rope_end_offset)
+    transformed_distance_error: Tensor = torch.exp(distance_error / distance_error_temp)
 
-    # Apply an exponential transform to the squared error to create a smooth and more responsive reward landscape
-    reward: Tensor = -torch.exp(squared_error / displacement_temp)
+    # Total reward is the transformed distance error. Additional reward components can be added as necessary.
+    reward: Tensor = transformed_distance_error
 
-    # Organize individual reward components for potential debugging or analysis
+    # Dictionary for returning individual components of the reward for debugging or analysis
     reward_components: Dict[str, Tensor] = {
-        "displacement_error": displacement_error,
-        "squared_error": squared_error
+        "transformed_distance_error": transformed_distance_error,
+        "raw_distance_error": distance_error
     }
 
     return reward, reward_components

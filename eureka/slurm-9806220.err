@@ -1,0 +1,15 @@
+Error executing job with overrides: ['env=shadow_hand_rope', 'iteration=2', 'sample=6']
+Traceback (most recent call last):
+  File "eureka.py", line 250, in main
+    reward_correlation = np.corrcoef(gt_reward, gpt_reward)[0, 1]
+  File "<__array_function__ internals>", line 200, in corrcoef
+  File "/scratch/bdes/haorany7/anaconda3/envs/eureka/lib/python3.8/site-packages/numpy/lib/function_base.py", line 2846, in corrcoef
+    c = cov(x, y, rowvar, dtype=dtype)
+  File "<__array_function__ internals>", line 200, in cov
+  File "/scratch/bdes/haorany7/anaconda3/envs/eureka/lib/python3.8/site-packages/numpy/lib/function_base.py", line 2640, in cov
+    X = np.concatenate((X, y), axis=0)
+  File "<__array_function__ internals>", line 200, in concatenate
+ValueError: all the input array dimensions except for the concatenation axis must match exactly, but along dimension 1, the array at index 0 has size 0 and the array at index 1 has size 3000
+
+Set the environment variable HYDRA_FULL_ERROR=1 for a complete stack trace.
+srun: error: gpua004: task 0: Exited with exit code 1
