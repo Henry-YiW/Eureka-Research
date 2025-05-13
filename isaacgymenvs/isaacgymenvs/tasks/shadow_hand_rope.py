@@ -175,6 +175,10 @@ class ShadowHandRope(VecTask):
         self.total_successes = 0
         self.total_resets = 0
 
+        # <<< Add reset_goal_buf initialization >>>
+        self.reset_goal_buf = torch.zeros_like(self.reset_buf)
+        # <<< End add reset_goal_buf initialization >>>
+
         # Random force parameters
         self.force_decay = to_torch(self.force_decay, dtype=torch.float, device=self.device)
         self.force_prob_range = to_torch(self.force_prob_range, dtype=torch.float, device=self.device)
@@ -185,8 +189,9 @@ class ShadowHandRope(VecTask):
         # Target displacement state
         # self.is_target_positive = torch.ones(self.num_envs, dtype=torch.bool, device=self.device) # Start by targeting positive displacement
         # self.current_target_displacement = torch.full((self.num_envs,), self.target_displacement_positive, dtype=torch.float, device=self.device) # Use local_rope_end_offset instead
-        self.local_rope_end_offset = torch.full((self.num_envs, 1), self.target_displacement_positive, dtype=torch.float, device=self.device)
-        self.target_displacement = self.local_rope_end_offset.clone() # Initialize based on local_rope_end_offset for generated reward
+        self.target_displacement_positive_val = self.target_displacement_positive # Store the initial positive value
+        self.local_rope_end_offset = torch.full((self.num_envs, 1), self.target_displacement_positive_val, dtype=torch.float, device=self.device)
+        # self.target_displacement = self.local_rope_end_offset.clone() # Initialize based on local_rope_end_offset for generated reward # Removed, JIT function uses target directly
 
     def create_sim(self):
         self.sim_params.up_axis = gymapi.UP_AXIS_Z
@@ -357,69 +362,45 @@ class ShadowHandRope(VecTask):
         )
 
     def compute_reward(self, actions):
-        # --- Get states --- 
-        # Ensure observations are computed first (usually done in post_physics_step before calling compute_reward)
-        # We need: self.rope_pos, self.rope_rot, self.rigid_body_states
-
-        palm_pos = self.rigid_body_states[:, self.palm_handle, 0:3] # Get palm position
-        rope_center_pos = self.rope_pos
-        rope_rot = self.rope_rot
-
-        # --- Calculate relative displacement along rope axis ---
-        # Use pre-calculated palm displacement from compute_observations
+        # <<< Start: Modify compute_reward to call JIT function >>>
+        # --- Get states needed for JIT function ---
+        # Ensure observations are computed first to get self.current_palm_displacement
         current_displacement = self.current_palm_displacement
+        # Target displacement needs to match shape of current_displacement (N,)
+        target_displacement = self.local_rope_end_offset.squeeze(-1)
 
-        # Also need vec_rope_to_palm for fall check, calculate it here
-        vec_rope_to_palm = palm_pos - rope_center_pos
-        
-        # --- Calculate reward based on distance to target displacement ---
-        # Note: Using palm displacement, target is offset from rope center
-        # Ensure local_rope_end_offset has correct shape (N, 1) -> (N,)
-        displacement_error = torch.abs(current_displacement - self.local_rope_end_offset.squeeze(-1))
-        # Use exponential reward: higher reward for smaller error
-        dist_rew = torch.exp(-self.dist_reward_scale * displacement_error)
-        # Print displacement error (loss) - Mean over envs
-        print(f"Mean Displacement Error: {displacement_error.mean().item():.4f}")
+        # Note: The original compute_reward calculated fall distance.
+        # The user's JIT function calculates it internally.
+        # Also, the original compute_reward handled target flipping.
+        # The user's JIT function does NOT flip the target.
+        # We will rely on the JIT function for reward and resets.
 
-        # --- Check if target displacement is reached ---
-        reached_target = (displacement_error < self.success_tolerance)
-
-        # --- Update target displacement if reached (Flip sign) ---
-        # Identify envs that reached the target
-        reached_target_indices = torch.nonzero(reached_target).squeeze(-1)
-
-        # Flip the sign of the target displacement for these envs
-        if len(reached_target_indices) > 0:
-            self.local_rope_end_offset[reached_target_indices] *= -1.0
-
-        # --- Calculate penalties ---
-        # Action penalty
-        action_penalty = torch.sum(actions**2, dim=-1) * self.action_penalty_scale
-
-        # Fall penalty (if rope center is too far from palm)
-        fall_dist_check = torch.norm(vec_rope_to_palm, p=2, dim=-1)
-        is_falling = (fall_dist_check > self.fall_dist)
-        fall_penalty_reward = is_falling * self.fall_penalty # Apply penalty if falling
-
-        # --- Combine reward components ---
-        self.rew_buf[:] = dist_rew - action_penalty + (reached_target * self.reach_goal_bonus) + fall_penalty_reward
-
-        # *** Print total reward (mean over envs) ***
-        print(f"Mean Total Reward: {self.rew_buf.mean().item():.4f}")
-        # *** End Print ***
-
-        # --- Determine resets ---
-        # Reset if falling or max episode length reached
-        self.reset_buf[:] = torch.where(is_falling, torch.ones_like(self.reset_buf), self.reset_buf)
-        self.reset_buf[:] = torch.where(self.progress_buf >= self.max_episode_length - 1, torch.ones_like(self.reset_buf), self.reset_buf)
+        # Call the JIT function and assign directly
+        # <<< Update JIT call to include reset_goal_buf_val >>>
+        self.rew_buf[:], self.reset_buf[:], self.reset_goal_buf[:], self.progress_buf[:], self.successes[:], self.consecutive_successes[:] = compute_hand_reward(
+            self.rew_buf, self.reset_buf, self.reset_goal_buf, self.progress_buf, self.successes, self.consecutive_successes,
+            self.max_episode_length, current_displacement, target_displacement,
+            self.dist_reward_scale, self.rot_reward_scale, self.rot_eps, # Note: rot_reward_scale, rot_eps might not be used by user's JIT func
+            self.actions, self.action_penalty_scale,
+            self.success_tolerance, self.reach_goal_bonus, self.fall_dist,
+            self.fall_penalty, self.max_consecutive_successes, self.av_factor
+        )
+        # --- Removed intermediate variables and separate assignments --- 
 
         # --- Update extras (optional) ---
         self.extras["current_displacement"] = current_displacement.mean()
-        self.extras["target_displacement"] = self.local_rope_end_offset[0].mean() # Note: this mean might not be super informative if targets differ
-        self.extras["consecutive_successes"] = self.consecutive_successes.mean() # Keep this for consistency, though might not be updated here
+        self.extras["target_displacement"] = target_displacement.mean() # Note: Mean of targets
+        self.extras["consecutive_successes"] = self.consecutive_successes.mean()
         # Ensure gpt_reward exists if other parts of the system expect it (can be zero)
         if "gpt_reward" not in self.extras:
              self.extras["gpt_reward"] = torch.zeros_like(self.rew_buf).mean()
+
+        # *** Print displacement error (loss) - Mean over envs ***
+        displacement_error = torch.abs(current_displacement - target_displacement)
+        print(f"Mean Displacement Error: {displacement_error.mean().item():.4f}")
+        # *** Print total reward (mean over envs) ***
+        print(f"Mean Total Reward: {self.rew_buf.mean().item():.4f}")
+        # <<< End: Modify compute_reward to call JIT function >>>
 
     def compute_observations(self):
         # Refresh tensors
@@ -611,6 +592,31 @@ class ShadowHandRope(VecTask):
         # num_total_dims = self.num_states if asymm_obs else self.num_observations
         # if obs_idx < num_total_dims:
         #      buf[:, obs_idx:] = 0
+    def reset_target_pose(self, env_ids, apply_reset=False):
+        """
+        Updates target poses for specified environments
+        """
+        # Get current target displacements
+        current_targets = self.local_rope_end_offset[env_ids]
+
+        # Generate new target displacements (alternating between positive and negative)
+        new_targets = -current_targets  # Simple flip between positive and negative
+
+        # Update targets
+        self.local_rope_end_offset[env_ids] = new_targets
+
+        if apply_reset:
+            # Reset rope positions if needed
+            self.root_state_tensor[self.rope_indices[env_ids]] = self.rope_init_state[env_ids].clone()
+            rope_indices_int32 = self.rope_indices[env_ids].to(torch.int32)
+            self.gym.set_actor_root_state_tensor_indexed(self.sim,
+                                                       gymtorch.unwrap_tensor(self.root_state_tensor),
+                                                       gymtorch.unwrap_tensor(rope_indices_int32),
+                                                       len(rope_indices_int32))
+        # <<< Add clearing of reset_goal_buf >>>
+        if len(env_ids) > 0: # Check to prevent error if env_ids is empty
+            self.reset_goal_buf[env_ids] = 0
+        # <<< End clearing of reset_goal_buf >>>
 
     def reset_idx(self, env_ids):
         # Resetting logic needs careful adaptation for the rope task
@@ -618,6 +624,12 @@ class ShadowHandRope(VecTask):
 
         if self.randomize:
             self.apply_randomizations(self.randomization_params)
+
+        # <<< Call reset_target_pose within reset_idx >>>
+        # This ensures target is flipped/updated on full environment resets, similar to Spin
+        if len(env_ids) > 0: # Ensure env_ids is not empty before calling
+            self.reset_target_pose(env_ids)
+        # <<< End call reset_target_pose >>>
 
         # generate random values
         rand_floats = torch_rand_float(-1.0, 1.0, (len(env_ids), self.num_shadow_hand_dofs * 2 + 5), device=self.device)
@@ -671,12 +683,33 @@ class ShadowHandRope(VecTask):
         self.reset_buf[env_ids] = 0
         self.successes[env_ids] = 0
 
-    def pre_physics_step(self, actions):
-        env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1)
+        # <<< Start: Reset target displacement to initial positive value >>>
+        # self.local_rope_end_offset[env_ids] = self.target_displacement_positive_val # REMOVED - target handling moved
+        # <<< End: Reset target displacement to initial positive value >>>
 
-        # Reset environments that need it
-        if len(env_ids) > 0:
-            self.reset_idx(env_ids)
+    def pre_physics_step(self, actions):
+        # env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1) # OLD LOGIC
+
+        # # Reset environments that need it # OLD LOGIC
+        # if len(env_ids) > 0: # OLD LOGIC
+        #     self.reset_idx(env_ids) # OLD LOGIC
+
+        # <<< Start: New pre_physics_step logic based on ShadowHandSpin >>>
+        goal_env_ids = self.reset_goal_buf.nonzero(as_tuple=False).squeeze(-1)
+        env_ids_to_reset = self.reset_buf.nonzero(as_tuple=False).squeeze(-1)
+
+        # Handle goal resets (target flip).
+        # In Spin, reset_target_pose clears the reset_goal_buf.
+        if len(goal_env_ids) > 0:
+            self.reset_target_pose(goal_env_ids) # apply_reset not directly applicable / needed for rope
+
+        # Handle full environment resets.
+        # reset_idx will also call reset_target_pose for these env_ids.
+        # If an env is in both goal_env_ids and env_ids_to_reset, its target will be flipped twice
+        # (once by the call above, once by the call inside reset_idx). This matches Spin's behavior.
+        if len(env_ids_to_reset) > 0:
+            self.reset_idx(env_ids_to_reset)
+        # <<< End: New pre_physics_step logic >>>
 
         # Apply actions
         self.actions = actions.clone().to(self.device)
@@ -721,8 +754,90 @@ class ShadowHandRope(VecTask):
             # Add visualization for rope if needed
             # ... similar to goal visualization in Spin task ...
 
-# Helper function (copied from Spin) - adjust if needed for rope rotations
+    
+
+
 @torch.jit.script
 def randomize_rotation(rand0, rand1, x_unit_tensor, y_unit_tensor):
     return quat_mul(quat_from_angle_axis(rand0 * np.pi, x_unit_tensor),
-                    quat_from_angle_axis(rand1 * np.pi, y_unit_tensor)) 
+                    quat_from_angle_axis(rand1 * np.pi, y_unit_tensor))
+
+
+@torch.jit.script
+def compute_hand_reward( 
+    rew_buf, reset_buf, reset_goal_buf, progress_buf, successes, consecutive_successes, # Added reset_goal_buf
+    max_episode_length: float, current_displacement, target_displacement,
+    dist_reward_scale: float, rot_reward_scale: float, rot_eps: float, # rot params added for signature match, may not be used
+    actions, action_penalty_scale: float,
+    success_tolerance: float, reach_goal_bonus: float, fall_dist: float,
+    fall_penalty: float, max_consecutive_successes: int, av_factor: float
+):
+    # Calculate displacement error and reward
+    displacement_error = torch.abs(current_displacement - target_displacement)
+    # Using exponential reward based on original class method
+    dist_reward = torch.exp(-dist_reward_scale * displacement_error)
+
+    # Action penalty
+    action_penalty = torch.sum(actions ** 2, dim=-1)
+
+    # Total reward is: position distance + action regularization + success bonus + fall penalty
+    # Using user's formula: dist_reward + action_penalty * scale
+    # Original class method included fall_penalty directly here.
+    # User JIT calculates fall penalty separately and applies later? No, seems it uses fall_dist for resets.
+    # Let's stick to user's JIT structure:
+    reward = dist_reward - action_penalty * action_penalty_scale # Changed '+' to '-' assuming penalty
+
+    # Find out which envs hit the goal and update successes count
+    # Comparing error to tolerance
+    # <<< This becomes reset_goal_buf_out >>>
+    reset_goal_buf_out = torch.where(displacement_error <= success_tolerance, torch.ones_like(reset_goal_buf), torch.zeros_like(reset_goal_buf)) # Use zeros_like for initial state if not goal
+    # Increment successes only if reset is 1 (i.e., goal reached)
+    successes = successes + reset_goal_buf_out # Use reset_goal_buf_out here
+
+    # Success bonus: displacement is within `success_tolerance` of target
+    reward = torch.where(reset_goal_buf_out == 1, reward + reach_goal_bonus, reward)
+
+    # Determine resets based on fall distance (displacement error too large)
+    fall_resets = torch.where(displacement_error >= fall_dist, torch.ones_like(reset_buf), torch.zeros_like(reset_buf))
+    # Apply fall penalty where fall_resets is 1
+    reward = torch.where(fall_resets == 1, reward + fall_penalty, reward)
+
+    # Combine resets: reset if falling OR max episode length reached OR max consecutive successes reached
+    resets = fall_resets
+
+    # Handle max consecutive successes reset logic
+    if max_consecutive_successes > 0:
+        # Reset progress buffer on goal envs if max_consecutive_successes > 0
+        # Important: Only reset progress if goal was JUST reached (reset_goal_buf_out == 1)
+        progress_buf = torch.where(reset_goal_buf_out == 1, torch.zeros_like(progress_buf), progress_buf)
+        resets = torch.where(successes >= max_consecutive_successes, torch.ones_like(resets), resets) # Reset if max successes reached
+
+    # Handle max episode length reset
+    resets = torch.where(progress_buf >= max_episode_length - 1, torch.ones_like(resets), resets)
+
+    # Apply penalty for timing out (not reaching goal by max episode length)
+    # This seems different from user's JIT, adding based on original shadow_hand logic
+    # reward = torch.where((progress_buf >= max_episode_length - 1) & (reset_goal_buf_out == 0), reward + 0.5 * fall_penalty, reward) # Penalize timeout only if not successful
+
+    # Calculate average consecutive successes
+    # Need to ensure successes are reset to 0 when env resets
+    # Note: This calculation happens *before* successes are potentially reset below
+    num_resets = torch.sum(resets)
+    finished_cons_successes = torch.sum(successes * resets.float()) # Sum successes for envs that are resetting *now*
+
+    # Reset successes count for envs that are resetting
+    successes = torch.where(resets == 1, torch.zeros_like(successes), successes)
+
+    # Calculate the running average
+    cons_successes = torch.where(num_resets > 0, av_factor*finished_cons_successes/num_resets + (1.0 - av_factor)*consecutive_successes, consecutive_successes)
+
+    # Reset progress buf for envs that reset (already handled for goal resets if max_consecutive > 0)
+    # Ensure progress buf is reset for fall resets and max length resets too
+    progress_buf = torch.where(resets == 1, torch.zeros_like(progress_buf), progress_buf)
+
+    # The user's JIT function signature implies returning goal_resets is not needed,
+    # unlike the original JIT function. We adapt to return what the class method expects.
+    # The class method now expects: reward, resets, progress_buf, successes, cons_successes
+    # <<< Update JIT return >>>
+    return reward, resets, reset_goal_buf_out, progress_buf, successes, cons_successes
+# <<< End: Add user-provided JIT function >>> 
