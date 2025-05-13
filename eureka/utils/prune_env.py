@@ -36,7 +36,6 @@ def modify_python_file(task, filename, output):
             continue
         
         if f"compute_{task}_reward" in line:
-
             if "@torch.jit.script" not in prev_line:
                 # Create compute_success function 
                 line = line.replace("self.rew_buf[:], ", "self.gt_rew_buf, ")

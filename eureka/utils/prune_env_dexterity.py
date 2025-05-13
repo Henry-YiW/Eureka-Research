@@ -16,9 +16,13 @@ def modify_python_file(filename, output):
     in_success = False 
 
     for line in lines:
+        
         stripped = line.strip()
+        #print("Processing line:", stripped)  # Debug print
+        
         # Ignore comment lines
         if stripped.startswith("#"):
+            #print("Skipping comment line:", stripped)  # Debug print
             continue
         
         # Check for docstrings (triple-quoted strings)
@@ -33,15 +37,20 @@ def modify_python_file(filename, output):
         if inside_docstring:
             continue
 
+
         if "compute_hand_reward" in line:
             if "@torch.jit.script" not in prev_line:
                 # Create compute_success function 
+                print("line without @torch.jit.script in prev_line: ", line)
                 line = line.replace("self.rew_buf[:], ", "self.gt_rew_buf, ")
                 line = line.replace("compute_hand_reward", "compute_success")
+                print("line after compute_success: ", line)
                 in_success = True 
             else:
+                print("else case - JIT function definition: ", line)
                 # Replace "compute_hand_reward" with "compute_success" in the current line
                 line = line.replace("compute_hand_reward", "compute_success")
+                print("after replacement: ", line)
             modified_lines.append(line)
         else:
             if in_success and line.strip() == ")":
@@ -170,19 +179,20 @@ def create_yaml(file_path, yaml_path):
 
 if __name__ == "__main__":
     EUREKA_ROOT_DIR = os.getcwd()
-    ISAAC_ROOT_DIR = f"{EUREKA_ROOT_DIR}/../isaacgymenvs/isaacgymenvs"
+    ISAAC_ROOT_DIR = f"{EUREKA_ROOT_DIR}/../../isaacgymenvs/isaacgymenvs"
 
-    tasks = ["shadow_hand_block_stack", "shadow_hand_bottle_cap", "shadow_hand_catch_abreast",
-            "shadow_hand_catch_over2underarm", "shadow_hand_catch_underarm", 
-            "shadow_hand_door_close_inward", "shadow_hand_door_close_outward",
-            "shadow_hand_door_open_inward", "shadow_hand_door_open_outward",
-            "shadow_hand_grasp_and_place", "shadow_hand_kettle", 
-            "shadow_hand_lift_underarm", "shadow_hand_over",
-            "shadow_hand_pen", "shadow_hand_push_block",
-            "shadow_hand_push_block", "shadow_hand_re_orientation",
-            "shadow_hand_scissors", 
-            "shadow_hand_swing_cup", "shadow_hand_switch",
-            "shadow_hand_two_catch_underarm"]
+    # tasks = ["shadow_hand_block_stack", "shadow_hand_bottle_cap", "shadow_hand_catch_abreast",
+    #         "shadow_hand_catch_over2underarm", "shadow_hand_catch_underarm", 
+    #         "shadow_hand_door_close_inward", "shadow_hand_door_close_outward",
+    #         "shadow_hand_door_open_inward", "shadow_hand_door_open_outward",
+    #         "shadow_hand_grasp_and_place", "shadow_hand_kettle", 
+    #         "shadow_hand_lift_underarm", "shadow_hand_over",
+    #         "shadow_hand_pen", "shadow_hand_push_block",
+    #         "shadow_hand_push_block", "shadow_hand_re_orientation",
+    #         "shadow_hand_scissors", 
+    #         "shadow_hand_swing_cup", "shadow_hand_switch",
+    #         "shadow_hand_two_catch_underarm", "shadow_hand_spin"]
+    tasks = ["shadow_hand_rope"]
 
     for task in tasks:
         # Create base environment file to write reward function for
