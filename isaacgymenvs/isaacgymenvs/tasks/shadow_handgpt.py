@@ -764,23 +764,21 @@ import torch
 from torch import Tensor
 @torch.jit.script
 def compute_reward(object_rot: Tensor, goal_rot: Tensor) -> Tuple[Tensor, Dict[str, Tensor]]:
-    # Increased sensitivity and adjusted the temperature parameter for orientation similarity
-    orientation_similarity_temperature: float = 0.01  # Increased sensitivity
+    # Ensure quaternions are normalized
+    object_rot = torch.nn.functional.normalize(object_rot, p=2, dim=-1)
+    goal_rot = torch.nn.functional.normalize(goal_rot, p=2, dim=-1)
 
-    # Calculate quaternion dot product to measure the similarity between rotations
+    # Calculate the dot product between object and goal rotations (quaternions)
     similarity = torch.sum(object_rot * goal_rot, dim=-1)
-    similarity = torch.abs(similarity)  # Handling the double-cover nature of quaternions
     
-    # Utilize a sharper exponential function based on feedback that previous scale was not rewarding enough differentiation
-    orientation_reward = torch.exp((similarity - 1.0) / orientation_similarity_temperature)
+    # Since the range of dot product of quaternions is from -1 (completely opposite) to 1 (exactly the same),
+    # transforming this to be from 0 to 1
+    similarity = (similarity + 1.0) / 2.0
 
-    # Maintain the bonus reward for high similarity achievement
-    similarity_threshold: float = 0.98
-    bonus_reward = torch.zeros_like(similarity)
-    bonus_indices = similarity > similarity_threshold
-    bonus_reward[bonus_indices] = 2.0  # Increased bonus reward to signify clear success
+    # We could even exponentiate the similarity to emphasize correct alignments more strongly (optional)
+    temperature_similarity: float = 0.5
+    reward = torch.exp(similarity / temperature_similarity)
 
-    total_reward = orientation_reward + bonus_reward
-    reward_components = {"orientation_reward": orientation_reward, "bonus_reward": bonus_reward}
-    
-    return total_reward, reward_components
+    # Return the reward and a dictionary for logging purposes
+    reward_components: Dict[str, Tensor] = {"similarity": similarity, "exp_similarity": reward}
+    return reward, reward_components

@@ -325,7 +325,7 @@ class ShadowHandRope(VecTask):
         target_displacement = self.local_rope_end_offset.squeeze(-1)
 
 
-        reward_val, reset_buf_val, reset_goal_buf_val, progress_buf_val, successes_val, consecutive_successes_val = compute_hand_reward(
+        self.gt_rew_buf, self.reset_buf[:], self.reset_goal_buf[:], self.progress_buf[:], self.successes[:], self.consecutive_successes[:] = compute_success(
             self.rew_buf, self.reset_buf, self.reset_goal_buf, self.progress_buf, self.successes, self.consecutive_successes,
             self.max_episode_length, current_displacement, target_displacement,
             self.dist_reward_scale, self.rot_reward_scale, self.rot_eps, # Note: rot_reward_scale, rot_eps might not be used by user's JIT func
@@ -333,13 +333,7 @@ class ShadowHandRope(VecTask):
             self.success_tolerance, self.reach_goal_bonus, self.fall_dist,
             self.fall_penalty, self.max_consecutive_successes, self.av_factor
         )
-        self.rew_buf[:] = reward_val
-        self.reset_buf[:] = reset_buf_val
-        self.reset_goal_buf[:] = reset_goal_buf_val
-        self.progress_buf[:] = progress_buf_val
-        self.successes[:] = successes_val
-        self.consecutive_successes[:] = consecutive_successes_val
-
+        self.extras['gt_reward'] = self.gt_rew_buf.mean()
         self.extras["current_displacement"] = current_displacement.mean()
         self.extras["target_displacement"] = target_displacement.mean() # Note: Mean of targets
         self.extras["consecutive_successes"] = self.consecutive_successes.mean()
@@ -482,3 +476,166 @@ class ShadowHandRope(VecTask):
         obs_idx += self.num_actions
 
     def reset_target_pose(self, env_ids, apply_reset=False):
+        current_targets = self.local_rope_end_offset[env_ids]
+
+        new_targets = -current_targets  # Simple flip between positive and negative
+
+        self.local_rope_end_offset[env_ids] = new_targets
+
+        if apply_reset:
+            self.root_state_tensor[self.rope_indices[env_ids]] = self.rope_init_state[env_ids].clone()
+            rope_indices_int32 = self.rope_indices[env_ids].to(torch.int32)
+            self.gym.set_actor_root_state_tensor_indexed(self.sim,
+                                                       gymtorch.unwrap_tensor(self.root_state_tensor),
+                                                       gymtorch.unwrap_tensor(rope_indices_int32),
+                                                       len(rope_indices_int32))
+        if len(env_ids) > 0: # Check to prevent error if env_ids is empty
+            self.reset_goal_buf[env_ids] = 0
+
+    def reset_idx(self, env_ids):
+
+        if self.randomize:
+            self.apply_randomizations(self.randomization_params)
+
+        if len(env_ids) > 0: # Ensure env_ids is not empty before calling
+            self.reset_target_pose(env_ids)
+
+        rand_floats = torch_rand_float(-1.0, 1.0, (len(env_ids), self.num_shadow_hand_dofs * 2 + 5), device=self.device)
+
+        self.rb_forces[env_ids, :, :] = 0.0
+
+        self.root_state_tensor[self.rope_indices[env_ids]] = self.rope_init_state[env_ids].clone()
+        self.root_state_tensor[self.rope_indices[env_ids], 0:3] += self.reset_position_noise * rand_floats[:, 0:3]
+        self.root_state_tensor[self.rope_indices[env_ids], 7:13] = torch.zeros_like(self.root_state_tensor[self.rope_indices[env_ids], 7:13])
+
+        rope_indices_int32 = self.rope_indices[env_ids].to(torch.int32)
+        self.gym.set_actor_root_state_tensor_indexed(self.sim,
+                                                     gymtorch.unwrap_tensor(self.root_state_tensor),
+                                                     gymtorch.unwrap_tensor(rope_indices_int32), len(rope_indices_int32))
+
+        self.random_force_prob[env_ids] = torch.exp((torch.log(self.force_prob_range[0]) - torch.log(self.force_prob_range[1]))
+                                                    * torch.rand(len(env_ids), device=self.device) + torch.log(self.force_prob_range[1]))
+
+        delta_max = self.shadow_hand_dof_upper_limits - self.shadow_hand_dof_default_pos
+        delta_min = self.shadow_hand_dof_lower_limits - self.shadow_hand_dof_default_pos
+        rand_delta = delta_min + (delta_max - delta_min) * 0.5 * (rand_floats[:, 5:5+self.num_shadow_hand_dofs] + 1)
+
+        pos = self.shadow_hand_default_dof_pos + self.reset_dof_pos_noise * rand_delta
+        self.shadow_hand_dof_pos[env_ids, :] = pos
+        self.shadow_hand_dof_vel[env_ids, :] = self.shadow_hand_dof_default_vel + \
+            self.reset_dof_vel_noise * rand_floats[:, 5+self.num_shadow_hand_dofs:5+self.num_shadow_hand_dofs*2]
+        self.prev_targets[env_ids, :self.num_shadow_hand_dofs] = pos
+        self.cur_targets[env_ids, :self.num_shadow_hand_dofs] = pos
+
+        hand_indices_int32 = self.hand_indices[env_ids].to(torch.int32)
+        self.gym.set_dof_position_target_tensor_indexed(self.sim,
+                                                        gymtorch.unwrap_tensor(self.prev_targets),
+                                                        gymtorch.unwrap_tensor(hand_indices_int32), len(env_ids))
+        self.gym.set_dof_state_tensor_indexed(self.sim,
+                                              gymtorch.unwrap_tensor(self.dof_state),
+                                              gymtorch.unwrap_tensor(hand_indices_int32), len(env_ids))
+
+        self.progress_buf[env_ids] = 0
+        self.reset_buf[env_ids] = 0
+        self.successes[env_ids] = 0
+
+
+    def pre_physics_step(self, actions):
+
+
+        goal_env_ids = self.reset_goal_buf.nonzero(as_tuple=False).squeeze(-1)
+        env_ids_to_reset = self.reset_buf.nonzero(as_tuple=False).squeeze(-1)
+
+        if len(goal_env_ids) > 0:
+            self.reset_target_pose(goal_env_ids) # apply_reset not directly applicable / needed for rope
+
+        if len(env_ids_to_reset) > 0:
+            self.reset_idx(env_ids_to_reset)
+
+        self.actions = actions.clone().to(self.device)
+        if self.use_relative_control:
+            targets = self.prev_targets[:, self.actuated_dof_indices] + self.shadow_hand_dof_speed_scale * self.dt * self.actions
+            self.cur_targets[:, self.actuated_dof_indices] = tensor_clamp(targets,
+                                                                          self.shadow_hand_dof_lower_limits[self.actuated_dof_indices], self.shadow_hand_dof_upper_limits[self.actuated_dof_indices])
+        else:
+            self.cur_targets[:, self.actuated_dof_indices] = scale(self.actions,
+                                                                   self.shadow_hand_dof_lower_limits[self.actuated_dof_indices], self.shadow_hand_dof_upper_limits[self.actuated_dof_indices])
+            self.cur_targets[:, self.actuated_dof_indices] = self.act_moving_average * self.cur_targets[:, self.actuated_dof_indices] + \
+                                                               (1.0 - self.act_moving_average) * self.prev_targets[:, self.actuated_dof_indices]
+            self.cur_targets[:, self.actuated_dof_indices] = tensor_clamp(self.cur_targets[:, self.actuated_dof_indices],
+                                                                          self.shadow_hand_dof_lower_limits[self.actuated_dof_indices], self.shadow_hand_dof_upper_limits[self.actuated_dof_indices])
+
+        self.prev_targets[:, self.actuated_dof_indices] = self.cur_targets[:, self.actuated_dof_indices]
+        self.gym.set_dof_position_target_tensor(self.sim, gymtorch.unwrap_tensor(self.cur_targets))
+
+        if self.force_scale > 0.0:
+            self.rb_forces *= torch.pow(self.force_decay, self.dt / self.force_decay_interval)
+            force_indices = (torch.rand(self.num_envs, device=self.device) < self.random_force_prob).nonzero()
+            self.rb_forces[force_indices, self.rope_rb_handles, :] = torch.randn(
+                self.rb_forces[force_indices, self.rope_rb_handles, :].shape, device=self.device) * self.rope_rb_masses * self.force_scale
+            self.gym.apply_rigid_body_force_tensors(self.sim, gymtorch.unwrap_tensor(self.rb_forces), None, gymapi.LOCAL_SPACE)
+
+    def post_physics_step(self):
+        self.progress_buf += 1
+        if self.randomize:
+            self.randomize_buf += 1
+
+        self.compute_observations()
+        self.compute_reward(self.actions) # Compute placeholder reward
+
+        if self.viewer and self.debug_viz:
+            self.gym.clear_lines(self.viewer)
+            self.gym.refresh_rigid_body_state_tensor(self.sim)
+
+    
+
+
+@torch.jit.script
+def randomize_rotation(rand0, rand1, x_unit_tensor, y_unit_tensor):
+    return quat_mul(quat_from_angle_axis(rand0 * np.pi, x_unit_tensor),
+                    quat_from_angle_axis(rand1 * np.pi, y_unit_tensor))
+
+
+@torch.jit.script
+def compute_success( 
+    rew_buf, reset_buf, reset_goal_buf, progress_buf, successes, consecutive_successes, # Added reset_goal_buf
+    max_episode_length: float, current_displacement, target_displacement,
+    dist_reward_scale: float, rot_reward_scale: float, rot_eps: float, # rot params added for signature match, may not be used
+    actions, action_penalty_scale: float,
+    success_tolerance: float, reach_goal_bonus: float, fall_dist: float,
+    fall_penalty: float, max_consecutive_successes: int, av_factor: float
+):
+    displacement_error = torch.abs(current_displacement - target_displacement)
+    dist_reward = torch.exp(-dist_reward_scale * displacement_error)
+
+    action_penalty = torch.sum(actions ** 2, dim=-1)
+
+    reward = dist_reward - action_penalty * action_penalty_scale # Changed '+' to '-' assuming penalty
+
+    reset_goal_buf_out = torch.where(displacement_error <= success_tolerance, torch.ones_like(reset_goal_buf), torch.zeros_like(reset_goal_buf)) # Use zeros_like for initial state if not goal
+    successes = successes + reset_goal_buf_out # Use reset_goal_buf_out here
+
+    reward = torch.where(reset_goal_buf_out == 1, reward + reach_goal_bonus, reward)
+
+    fall_resets = torch.where(displacement_error >= fall_dist, torch.ones_like(reset_buf), torch.zeros_like(reset_buf))
+    reward = torch.where(fall_resets == 1, reward + fall_penalty, reward)
+
+    resets = fall_resets
+
+    if max_consecutive_successes > 0:
+        progress_buf = torch.where(reset_goal_buf_out == 1, torch.zeros_like(progress_buf), progress_buf)
+        resets = torch.where(successes >= max_consecutive_successes, torch.ones_like(resets), resets) # Reset if max successes reached
+
+    resets = torch.where(progress_buf >= max_episode_length - 1, torch.ones_like(resets), resets)
+
+
+    num_resets = torch.sum(resets)
+    finished_cons_successes = torch.sum(successes * resets.float()) # Sum successes for envs that are resetting *now*
+
+    successes = torch.where(resets == 1, torch.zeros_like(successes), successes)
+
+    cons_successes = torch.where(num_resets > 0, av_factor*finished_cons_successes/num_resets + (1.0 - av_factor)*consecutive_successes, consecutive_successes)
+
+    progress_buf = torch.where(resets == 1, torch.zeros_like(progress_buf), progress_buf)
+
+    return reward, resets, reset_goal_buf_out, progress_buf, successes, cons_successes

@@ -36,37 +36,3 @@ class ShadowHandRope(VecTask):
         if self.asymmetric_obs:
             self.compute_full_state(True)
 
-    def compute_full_state(self, asymm_obs=False):
-        current_displacement = self.current_palm_displacement
-
-
-        buf = self.states_buf if asymm_obs else self.obs_buf
-        obs_idx = 0
-        buf[:, obs_idx:obs_idx+self.num_shadow_hand_dofs] = unscale(self.shadow_hand_dof_pos, self.shadow_hand_dof_lower_limits, self.shadow_hand_dof_upper_limits)
-        obs_idx += self.num_shadow_hand_dofs
-        buf[:, obs_idx:obs_idx+self.num_shadow_hand_dofs] = self.vel_obs_scale * self.shadow_hand_dof_vel
-        obs_idx += self.num_shadow_hand_dofs
-        buf[:, obs_idx:obs_idx+self.num_shadow_hand_dofs] = self.force_torque_obs_scale * self.dof_force_tensor
-        obs_idx += self.num_shadow_hand_dofs
-
-        buf[:, obs_idx:obs_idx+7] = self.rope_pose
-        obs_idx += 7
-        buf[:, obs_idx:obs_idx+3] = self.rope_linvel
-        obs_idx += 3
-        buf[:, obs_idx:obs_idx+3] = self.vel_obs_scale * self.rope_angvel
-        obs_idx += 3
-
-        num_ft_states = 13 * self.num_fingertips # 65
-        num_ft_force_torques = 6 * self.num_fingertips # 30
-        buf[:, obs_idx:obs_idx + num_ft_states] = self.fingertip_state.reshape(self.num_envs, num_ft_states)
-        obs_idx += num_ft_states
-        buf[:, obs_idx : obs_idx + num_ft_force_torques] = self.force_torque_obs_scale * self.vec_sensor_tensor
-        obs_idx += num_ft_force_torques
-
-        buf[:, obs_idx] = current_displacement
-        obs_idx += 1
-        buf[:, obs_idx] = self.local_rope_end_offset.squeeze(-1)
-        obs_idx += 1
-
-        buf[:, obs_idx:obs_idx + self.num_actions] = self.actions
-        obs_idx += self.num_actions

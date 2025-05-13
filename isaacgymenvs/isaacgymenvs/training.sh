@@ -1,0 +1,32 @@
+#!/bin/bash
+#SBATCH --job-name="a.out_symmetric"
+#SBATCH --output="a.out.%j.%N.out"
+#SBATCH --partition=gpuA100x4
+#SBATCH --mem=60G
+#SBATCH --ntasks-per-node=1  # could be 1 for py-torch
+#SBATCH --cpus-per-task=16   # spread out to use 1 core per numa, set to 64 if tasks is 1
+#SBATCH --constraint="projects"
+#SBATCH --gpus-per-node=1
+#SBATCH --gpu-bind=closest   # select a cpu close to gpu on pci bus topology
+#SBATCH --account=bdes-delta-gpu    # <- match to a "Project" returned by the "accounts" command
+#SBATCH --exclusive  # dedicated node for this job
+#SBATCH --requeue
+#SBATCH -t 24:00:00
+#SBATCH -e slurm-%j.err
+#SBATCH -o slurm-%j.out
+
+export LD_LIBRARY_PATH=/scratch/bdes/haorany7/anaconda3/envs/eureka/lib:$LD_LIBRARY_PATH
+# Configuration
+TASK="ShadowHandRope"
+HEADLESS="True"  # Set to "False" for visualization
+NUM_ENVS=8192      # Number of parallel environments
+MAX_ITERATIONS=20000  # Total training iterations
+
+
+
+# Execute training
+srun python train.py \
+    task=$TASK \
+    headless=$HEADLESS \
+    num_envs=$NUM_ENVS \
+    max_iterations=$MAX_ITERATIONS

@@ -1,0 +1,12 @@
+export LD_LIBRARY_PATH=/scratch/bdes/haorany7/anaconda3/envs/eureka/lib:$LD_LIBRARY_PATH
+CUDA_VISIBLE_DEVICES=0 python train.py \
+    task=ShadowHandRope \
+    checkpoint='/scratch/bdes/haorany7/Eureka-Research/isaacgymenvs/isaacgymenvs/outputs/train/2025-05-13_03-49-14/runs/ShadowHandRope-2025-05-13_03-49-57/nn/last_ShadowHandRope_ep_2000.pth' \
+    # headless=False \
+    # force_render=True \
+    graphics_device_id=0 \
+    num_envs=1 \
+    test=True \
+    rl_device=cuda:0 \
+    sim_device=cuda:0 \
+    +weights_only=True
