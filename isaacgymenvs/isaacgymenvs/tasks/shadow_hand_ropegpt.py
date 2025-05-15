@@ -11,7 +11,7 @@ from isaacgymenvs.utils.torch_jit_utils import *
 from isaacgymenvs.tasks.base.vec_task import VecTask
 
 
-class ShadowHandRope(VecTask):
+class ShadowHandRopeGPT(VecTask):
 
     def __init__(self, cfg, rl_device, sim_device, graphics_device_id, headless, virtual_screen_capture, force_render):
 
@@ -167,7 +167,10 @@ class ShadowHandRope(VecTask):
         self.rb_forces = torch.zeros((self.num_envs, self.num_bodies, 3), dtype=torch.float, device=self.device)
 
         self.target_displacement_positive_val = self.target_displacement_positive # Store the initial positive value
-        self.local_rope_end_offset = torch.full((self.num_envs, 1), self.target_displacement_positive_val, dtype=torch.float, device=self.device)
+
+        self.current_palm_displacement = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
+
+        self.target_displacement = torch.full((self.num_envs,), self.target_displacement_positive_val, dtype=torch.float, device=self.device)
 
     def create_sim(self):
         self.sim_params.up_axis = gymapi.UP_AXIS_Z
@@ -321,26 +324,25 @@ class ShadowHandRope(VecTask):
         )
 
     def compute_reward(self, actions):
-        current_displacement = self.current_palm_displacement
-        target_displacement = self.local_rope_end_offset.squeeze(-1)
-
-
+        self.rew_buf[:], self.rew_dict = compute_reward_enhanced(self.current_palm_displacement, self.target_displacement)
+        self.extras['gpt_reward'] = self.rew_buf.mean()
+        for rew_state in self.rew_dict: self.extras[rew_state] = self.rew_dict[rew_state].mean()
         self.gt_rew_buf, self.reset_buf[:], self.reset_goal_buf[:], self.progress_buf[:], self.successes[:], self.consecutive_successes[:] = compute_success(
             self.rew_buf, self.reset_buf, self.reset_goal_buf, self.progress_buf, self.successes, self.consecutive_successes,
-            self.max_episode_length, current_displacement, target_displacement,
-            self.dist_reward_scale, self.rot_reward_scale, self.rot_eps, # Note: rot_reward_scale, rot_eps might not be used by user's JIT func
+            self.max_episode_length, self.current_palm_displacement, self.target_displacement,
+            self.dist_reward_scale, self.rot_reward_scale, self.rot_eps,
             self.actions, self.action_penalty_scale,
             self.success_tolerance, self.reach_goal_bonus, self.fall_dist,
             self.fall_penalty, self.max_consecutive_successes, self.av_factor
         )
         self.extras['gt_reward'] = self.gt_rew_buf.mean()
-        self.extras["current_displacement"] = current_displacement.mean()
-        self.extras["target_displacement"] = target_displacement.mean() # Note: Mean of targets
+        self.extras["current_displacement"] = self.current_palm_displacement.mean()
+        self.extras["target_displacement"] = self.target_displacement.mean()
         self.extras["consecutive_successes"] = self.consecutive_successes.mean()
         if "gpt_reward" not in self.extras:
              self.extras["gpt_reward"] = torch.zeros_like(self.rew_buf).mean()
 
-        displacement_error = torch.abs(current_displacement - target_displacement)
+        displacement_error = torch.abs(self.current_palm_displacement - self.target_displacement)
         print(f"Mean Displacement Error: {displacement_error.mean().item():.4f}")
         print(f"Mean Total Reward: {self.rew_buf.mean().item():.4f}")
 
@@ -393,7 +395,7 @@ class ShadowHandRope(VecTask):
             obs_idx += 4
             self.obs_buf[:, obs_idx] = current_displacement
             obs_idx += 1
-            self.obs_buf[:, obs_idx] = self.local_rope_end_offset.squeeze(-1)
+            self.obs_buf[:, obs_idx] = self.target_displacement
             obs_idx += 1
             self.obs_buf[:, obs_idx:obs_idx+self.num_actions] = self.actions
             obs_idx += self.num_actions
@@ -433,7 +435,7 @@ class ShadowHandRope(VecTask):
 
         self.obs_buf[:, obs_idx] = current_displacement
         obs_idx += 1
-        self.obs_buf[:, obs_idx] = self.local_rope_end_offset.squeeze(-1)
+        self.obs_buf[:, obs_idx] = self.target_displacement
         obs_idx += 1
 
         self.obs_buf[:, obs_idx:obs_idx+self.num_actions] = self.actions
@@ -469,18 +471,18 @@ class ShadowHandRope(VecTask):
 
         buf[:, obs_idx] = current_displacement
         obs_idx += 1
-        buf[:, obs_idx] = self.local_rope_end_offset.squeeze(-1)
+        buf[:, obs_idx] = self.target_displacement
         obs_idx += 1
 
         buf[:, obs_idx:obs_idx + self.num_actions] = self.actions
         obs_idx += self.num_actions
 
     def reset_target_pose(self, env_ids, apply_reset=False):
-        current_targets = self.local_rope_end_offset[env_ids]
+        current_targets = self.target_displacement[env_ids]
 
         new_targets = -current_targets  # Simple flip between positive and negative
 
-        self.local_rope_end_offset[env_ids] = new_targets
+        self.target_displacement[env_ids] = new_targets
 
         if apply_reset:
             self.root_state_tensor[self.rope_indices[env_ids]] = self.rope_init_state[env_ids].clone()
@@ -639,3 +641,47 @@ def compute_success(
     progress_buf = torch.where(resets == 1, torch.zeros_like(progress_buf), progress_buf)
 
     return reward, resets, reset_goal_buf_out, progress_buf, successes, cons_successes
+
+from typing import Tuple, Dict
+import math
+import torch
+from torch import Tensor
+@torch.jit.script
+def compute_reward_enhanced(current_palm_displacement: torch.Tensor, target_displacement: torch.Tensor) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+    """
+    Enhanced reward function for guiding a shadow hand to slide rope to a target displacement.
+    
+    Args:
+    - current_palm_displacement (torch.Tensor): The current displacement of the palm along the rope's local Y-axis.
+    - target_displacement (torch.Tensor): The target displacement value.
+
+    Returns:
+    - (torch.Tensor): Total scalar reward for each item in the batch.
+    - (Dict[str, torch.Tensor]): Contains debug information about individual reward components.
+    """
+    # Ensure inputs are on the same device
+    target_displacement = target_displacement.to(current_palm_displacement.device)
+    
+    # Calculate displacement error
+    displacement_error = torch.abs(current_palm_displacement - target_displacement)
+
+    # Adjust reward for closeness to target, with a more sensitive temperature parameter
+    closeness_temp = torch.tensor(0.5, device=current_palm_displacement.device)  # Adjust sensitivity here
+    closeness_reward = torch.exp(-closeness_temp * displacement_error ** 2)  # Squared error for smoother gradient
+
+    # Introduce a penalty for large displacements deviations (suppressing oscillations)
+    penalty_temp = torch.tensor(0.1, device=current_palm_displacement.device)  # Smoothing factor
+    stability_penalty = torch.exp(-penalty_temp * displacement_error)
+    
+    # Total reward formula adjusted to balance the components
+    total_reward = closeness_reward + stability_penalty - 1.0  # Offset to start with a neutral reward effect
+
+    # Debug information
+    debug_info = {
+        "displacement_error": displacement_error,
+        "closeness_reward": closeness_reward,
+        "stability_penalty": stability_penalty,
+        "total_reward": total_reward
+    }
+
+    return total_reward, debug_info

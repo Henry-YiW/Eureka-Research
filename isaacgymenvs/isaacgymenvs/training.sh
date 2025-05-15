@@ -25,7 +25,7 @@ MAX_ITERATIONS=20000  # Total training iterations
 
 
 # Execute training
-srun python train.py \
+python train.py \
     task=$TASK \
     headless=$HEADLESS \
     num_envs=$NUM_ENVS \

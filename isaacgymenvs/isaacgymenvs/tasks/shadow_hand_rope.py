@@ -187,11 +187,16 @@ class ShadowHandRope(VecTask):
         self.rb_forces = torch.zeros((self.num_envs, self.num_bodies, 3), dtype=torch.float, device=self.device)
 
         # Target displacement state
-        # self.is_target_positive = torch.ones(self.num_envs, dtype=torch.bool, device=self.device) # Start by targeting positive displacement
-        # self.current_target_displacement = torch.full((self.num_envs,), self.target_displacement_positive, dtype=torch.float, device=self.device) # Use local_rope_end_offset instead
         self.target_displacement_positive_val = self.target_displacement_positive # Store the initial positive value
-        self.local_rope_end_offset = torch.full((self.num_envs, 1), self.target_displacement_positive_val, dtype=torch.float, device=self.device)
-        # self.target_displacement = self.local_rope_end_offset.clone() # Initialize based on local_rope_end_offset for generated reward # Removed, JIT function uses target directly
+        # Remove self.local_rope_end_offset initialization
+        # self.local_rope_end_offset = torch.full((self.num_envs, 1), self.target_displacement_positive_val, dtype=torch.float, device=self.device)
+
+        # Explicitly declare current_palm_displacement here for clarity
+        self.current_palm_displacement = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
+
+        # Explicitly declare target_displacement for clarity and LLM interpretation
+        # Initialize as a 1D tensor directly with the positive value
+        self.target_displacement = torch.full((self.num_envs,), self.target_displacement_positive_val, dtype=torch.float, device=self.device)
 
     def create_sim(self):
         self.sim_params.up_axis = gymapi.UP_AXIS_Z
@@ -362,25 +367,10 @@ class ShadowHandRope(VecTask):
         )
 
     def compute_reward(self, actions):
-        # <<< Start: Modify compute_reward to call JIT function >>>
-        # --- Get states needed for JIT function ---
-        # Ensure observations are computed first to get self.current_palm_displacement
-        current_displacement = self.current_palm_displacement
-        # Target displacement needs to match shape of current_displacement (N,)
-        target_displacement = self.local_rope_end_offset.squeeze(-1)
-
-        # Note: The original compute_reward calculated fall distance.
-        # The user's JIT function calculates it internally.
-        # Also, the original compute_reward handled target flipping.
-        # The user's JIT function does NOT flip the target.
-        # We will rely on the JIT function for reward and resets.
-
-        # Call the JIT function and assign directly
-        # <<< Update JIT call to include reset_goal_buf_val >>>
         self.rew_buf[:], self.reset_buf[:], self.reset_goal_buf[:], self.progress_buf[:], self.successes[:], self.consecutive_successes[:] = compute_hand_reward(
             self.rew_buf, self.reset_buf, self.reset_goal_buf, self.progress_buf, self.successes, self.consecutive_successes,
-            self.max_episode_length, current_displacement, target_displacement,
-            self.dist_reward_scale, self.rot_reward_scale, self.rot_eps, # Note: rot_reward_scale, rot_eps might not be used by user's JIT func
+            self.max_episode_length, self.current_palm_displacement, self.target_displacement,
+            self.dist_reward_scale, self.rot_reward_scale, self.rot_eps,
             self.actions, self.action_penalty_scale,
             self.success_tolerance, self.reach_goal_bonus, self.fall_dist,
             self.fall_penalty, self.max_consecutive_successes, self.av_factor
@@ -388,15 +378,15 @@ class ShadowHandRope(VecTask):
         # --- Removed intermediate variables and separate assignments --- 
 
         # --- Update extras (optional) ---
-        self.extras["current_displacement"] = current_displacement.mean()
-        self.extras["target_displacement"] = target_displacement.mean() # Note: Mean of targets
+        self.extras["current_displacement"] = self.current_palm_displacement.mean()
+        self.extras["target_displacement"] = self.target_displacement.mean()
         self.extras["consecutive_successes"] = self.consecutive_successes.mean()
         # Ensure gpt_reward exists if other parts of the system expect it (can be zero)
         if "gpt_reward" not in self.extras:
              self.extras["gpt_reward"] = torch.zeros_like(self.rew_buf).mean()
 
         # *** Print displacement error (loss) - Mean over envs ***
-        displacement_error = torch.abs(current_displacement - target_displacement)
+        displacement_error = torch.abs(self.current_palm_displacement - self.target_displacement)
         print(f"Mean Displacement Error: {displacement_error.mean().item():.4f}")
         # *** Print total reward (mean over envs) ***
         print(f"Mean Total Reward: {self.rew_buf.mean().item():.4f}")
@@ -476,7 +466,7 @@ class ShadowHandRope(VecTask):
             self.obs_buf[:, obs_idx] = current_displacement
             obs_idx += 1
             # Ensure local_rope_end_offset has correct shape (N, 1) -> (N,)
-            self.obs_buf[:, obs_idx] = self.local_rope_end_offset.squeeze(-1)
+            self.obs_buf[:, obs_idx] = self.target_displacement
             obs_idx += 1
             # Actions
             self.obs_buf[:, obs_idx:obs_idx+self.num_actions] = self.actions
@@ -530,7 +520,7 @@ class ShadowHandRope(VecTask):
         self.obs_buf[:, obs_idx] = current_displacement
         obs_idx += 1
         # Ensure local_rope_end_offset has correct shape (N, 1) -> (N,)
-        self.obs_buf[:, obs_idx] = self.local_rope_end_offset.squeeze(-1)
+        self.obs_buf[:, obs_idx] = self.target_displacement
         obs_idx += 1
 
         # Actions
@@ -581,7 +571,7 @@ class ShadowHandRope(VecTask):
         buf[:, obs_idx] = current_displacement
         obs_idx += 1
         # Ensure local_rope_end_offset has correct shape (N, 1) -> (N,)
-        buf[:, obs_idx] = self.local_rope_end_offset.squeeze(-1)
+        buf[:, obs_idx] = self.target_displacement
         obs_idx += 1
 
         # Actions
@@ -597,13 +587,13 @@ class ShadowHandRope(VecTask):
         Updates target poses for specified environments
         """
         # Get current target displacements
-        current_targets = self.local_rope_end_offset[env_ids]
+        current_targets = self.target_displacement[env_ids]
 
         # Generate new target displacements (alternating between positive and negative)
         new_targets = -current_targets  # Simple flip between positive and negative
 
         # Update targets
-        self.local_rope_end_offset[env_ids] = new_targets
+        self.target_displacement[env_ids] = new_targets
 
         if apply_reset:
             # Reset rope positions if needed

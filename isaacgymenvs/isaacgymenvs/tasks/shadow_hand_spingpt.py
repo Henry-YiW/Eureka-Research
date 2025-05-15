@@ -772,39 +772,31 @@ import torch
 from torch import Tensor
 @torch.jit.script
 def compute_reward(object_rot: Tensor, goal_rot: Tensor, object_angvel: Tensor) -> Tuple[Tensor, Dict[str, Tensor]]:
-    """
-    Computes the reward for spinning the pen to the target orientation.
-
-    Args:
-    - object_rot (Tensor): Current orientation quaternion of the object [w, x, y, z].
-    - goal_rot (Tensor): Target orientation quaternion of the object [w, x, y, z].
-    - object_angvel (Tensor): Current angular velocity of the object.
-
-    Returns:
-    - Total reward (Tensor),
-    - Individual reward components (Dict[str, Tensor]).
-    """
-    # Temperature constants for reward exponential transforms
-    orientation_temp: float = 0.1
-    ang_vel_temp: float = 0.05
-
-    # Reward for orientation accuracy
-    # Quaternion distance can be calculated as 1 - dot product of the normalized quaternions
-    quat_dot = torch.sum(object_rot * goal_rot, dim=-1)  # assuming quaternions are normalized
-    orientation_accuracy = torch.abs(quat_dot)  # Closer to 1 is better
-    orientation_reward = torch.exp((orientation_accuracy - 1.0) / orientation_temp)
-
-    # Reward for angular velocity being low to prevent wobbling
-    ang_vel_penalty = torch.norm(object_angvel, dim=-1)
-    angular_velocity_reward = torch.exp(-ang_vel_penalty / ang_vel_temp)
-
-    # Combined reward
-    total_reward = orientation_reward + angular_velocity_reward
-
-    # Dictionary of reward components
+    # Quaternion distance can be used as part of the reward function to encourage aligning object rotation to goal rotation.
+    # We use quaternion multiplication and the properties of quaternions to get a measure of distance.
+    q_conj = torch.tensor([1, -1, -1, -1], device=object_rot.device)  # Conjugate for inverse because quaternions are unit length
+    q_rel = torch.mul(object_rot, q_conj)  # Relative rotation from object to goal
+    q_goal = goal_rot
+    
+    # Quaternion Error Calculation: We calculate the dot product and ensure it's between -1 and 1 to compute acos safely
+    dot_product = torch.sum(q_rel * q_goal, dim=-1)
+    dot_product = torch.clamp(dot_product, -1.0, 1.0)
+    angle_error = 2.0 * torch.acos(torch.abs(dot_product))  # Angle in radians
+    
+    # Angular velocity penalty to ensure minimal residual spinning
+    angular_velocity_magnitude = torch.norm(object_angvel, dim=-1)
+    
+    # Reward components calculation
+    rot_reward = torch.exp(-10.0 * angle_error)  # Exponentially decrease reward as error increases
+    angvel_penalty = torch.exp(-0.1 * angular_velocity_magnitude)  # Minor penalty for high angular velocities
+    
+    # Total reward calculation
+    total_reward = rot_reward * angvel_penalty
+    
+    # Dictionary for reward components to track individual contributions
     reward_components = {
-        "orientation_reward": orientation_reward,
-        "angular_velocity_reward": angular_velocity_reward
+        "rotation_reward": rot_reward,
+        "angular_velocity_penalty": angvel_penalty
     }
 
     return total_reward, reward_components
