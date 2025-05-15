@@ -324,7 +324,7 @@ class ShadowHandRopeGPT(VecTask):
         )
 
     def compute_reward(self, actions):
-        self.rew_buf[:], self.rew_dict = compute_reward_enhanced(self.current_palm_displacement, self.target_displacement)
+        self.rew_buf[:], self.rew_dict = compute_reward(self.current_palm_displacement, self.target_displacement, self.episode_length)
         self.extras['gpt_reward'] = self.rew_buf.mean()
         for rew_state in self.rew_dict: self.extras[rew_state] = self.rew_dict[rew_state].mean()
         self.gt_rew_buf, self.reset_buf[:], self.reset_goal_buf[:], self.progress_buf[:], self.successes[:], self.consecutive_successes[:] = compute_success(
@@ -647,41 +647,32 @@ import math
 import torch
 from torch import Tensor
 @torch.jit.script
-def compute_reward_enhanced(current_palm_displacement: torch.Tensor, target_displacement: torch.Tensor) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
-    """
-    Enhanced reward function for guiding a shadow hand to slide rope to a target displacement.
+def compute_reward(current_palm_displacement: torch.Tensor, target_displacement: torch.Tensor, episode_length: torch.Tensor) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+    # Adjusted temperature parameters
+    displacement_temperature: float = 10.0    # Increased sensitivity
+    bonus_temperature: float = 20.0           # Sharper bonus
+    length_penalty_temperature: float = 0.01  # New penalty for length
     
-    Args:
-    - current_palm_displacement (torch.Tensor): The current displacement of the palm along the rope's local Y-axis.
-    - target_displacement (torch.Tensor): The target displacement value.
-
-    Returns:
-    - (torch.Tensor): Total scalar reward for each item in the batch.
-    - (Dict[str, torch.Tensor]): Contains debug information about individual reward components.
-    """
-    # Ensure inputs are on the same device
-    target_displacement = target_displacement.to(current_palm_displacement.device)
-    
-    # Calculate displacement error
+    # Calculate the absolute displacement error
     displacement_error = torch.abs(current_palm_displacement - target_displacement)
-
-    # Adjust reward for closeness to target, with a more sensitive temperature parameter
-    closeness_temp = torch.tensor(0.5, device=current_palm_displacement.device)  # Adjust sensitivity here
-    closeness_reward = torch.exp(-closeness_temp * displacement_error ** 2)  # Squared error for smoother gradient
-
-    # Introduce a penalty for large displacements deviations (suppressing oscillations)
-    penalty_temp = torch.tensor(0.1, device=current_palm_displacement.device)  # Smoothing factor
-    stability_penalty = torch.exp(-penalty_temp * displacement_error)
     
-    # Total reward formula adjusted to balance the components
-    total_reward = closeness_reward + stability_penalty - 1.0  # Offset to start with a neutral reward effect
-
-    # Debug information
-    debug_info = {
-        "displacement_error": displacement_error,
-        "closeness_reward": closeness_reward,
-        "stability_penalty": stability_penalty,
-        "total_reward": total_reward
+    # Reward for minimizing the displacement error with higher sensitivity
+    displacement_reward = torch.exp(-displacement_temperature * displacement_error)
+    
+    # Adjusted bonus reward: stricter criteria for full bonus
+    bonus_reward = torch.exp(-bonus_temperature * torch.pow(displacement_error, 2))
+    
+    # Introduce an episode length penalty to encourage efficiency
+    length_penalty = torch.exp(-length_penalty_temperature * episode_length)
+    
+    # Total reward combines all components, adjusting as necessary
+    total_reward = displacement_reward + bonus_reward + length_penalty
+    
+    # Reward components as a dictionary for possible troubleshooting and analysis
+    reward_components = {
+        "displacement_reward": displacement_reward,
+        "bonus_reward": bonus_reward,
+        "length_penalty": length_penalty
     }
 
-    return total_reward, debug_info
+    return total_reward, reward_components

@@ -1,0 +1,5 @@
+Traceback (most recent call last):
+  File "/scratch/bdes/haorany7/Eureka-Research/eureka/eureka.py", line 1, in <module>
+srun: error: gpua066: task 0: Exited with exit code 1
+    import hydra
+ModuleNotFoundError: No module named 'hydra'
