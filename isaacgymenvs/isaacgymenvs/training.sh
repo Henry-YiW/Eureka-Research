@@ -17,10 +17,11 @@
 
 export LD_LIBRARY_PATH=/scratch/bdes/haorany7/anaconda3/envs/eureka/lib:$LD_LIBRARY_PATH
 # Configuration
-TASK="ShadowHandRope"
+TASK="AntExp"
 HEADLESS="True"  # Set to "False" for visualization
+FORCE_RENDER="False"
 NUM_ENVS=8192      # Number of parallel environments
-MAX_ITERATIONS=20000  # Total training iterations
+MAX_ITERATIONS=3000  # Total training iterations
 
 
 
@@ -28,5 +29,6 @@ MAX_ITERATIONS=20000  # Total training iterations
 python train.py \
     task=$TASK \
     headless=$HEADLESS \
+    force_render=$FORCE_RENDER \
     num_envs=$NUM_ENVS \
     max_iterations=$MAX_ITERATIONS

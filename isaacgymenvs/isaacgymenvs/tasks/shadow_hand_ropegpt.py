@@ -324,7 +324,7 @@ class ShadowHandRopeGPT(VecTask):
         )
 
     def compute_reward(self, actions):
-        self.rew_buf[:], self.rew_dict = compute_reward(self.current_palm_displacement, self.target_displacement, self.episode_length)
+        self.rew_buf[:], self.rew_dict = compute_reward(self.current_palm_displacement, self.target_displacement)
         self.extras['gpt_reward'] = self.rew_buf.mean()
         for rew_state in self.rew_dict: self.extras[rew_state] = self.rew_dict[rew_state].mean()
         self.gt_rew_buf, self.reset_buf[:], self.reset_goal_buf[:], self.progress_buf[:], self.successes[:], self.consecutive_successes[:] = compute_success(
@@ -647,32 +647,29 @@ import math
 import torch
 from torch import Tensor
 @torch.jit.script
-def compute_reward(current_palm_displacement: torch.Tensor, target_displacement: torch.Tensor, episode_length: torch.Tensor) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
-    # Adjusted temperature parameters
-    displacement_temperature: float = 10.0    # Increased sensitivity
-    bonus_temperature: float = 20.0           # Sharper bonus
-    length_penalty_temperature: float = 0.01  # New penalty for length
-    
-    # Calculate the absolute displacement error
+def compute_reward(current_palm_displacement: torch.Tensor, target_displacement: torch.Tensor) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+    # New adjustment to error scaling for finer control
     displacement_error = torch.abs(current_palm_displacement - target_displacement)
-    
-    # Reward for minimizing the displacement error with higher sensitivity
-    displacement_reward = torch.exp(-displacement_temperature * displacement_error)
-    
-    # Adjusted bonus reward: stricter criteria for full bonus
-    bonus_reward = torch.exp(-bonus_temperature * torch.pow(displacement_error, 2))
-    
-    # Introduce an episode length penalty to encourage efficiency
-    length_penalty = torch.exp(-length_penalty_temperature * episode_length)
-    
-    # Total reward combines all components, adjusting as necessary
-    total_reward = displacement_reward + bonus_reward + length_penalty
-    
-    # Reward components as a dictionary for possible troubleshooting and analysis
-    reward_components = {
-        "displacement_reward": displacement_reward,
-        "bonus_reward": bonus_reward,
-        "length_penalty": length_penalty
-    }
+    scaled_error = displacement_error * 0.7  # Reduced influence for minor adjustment
 
+    # Sharpened penalty for deviations from the target
+    error_temperature: float = 0.02  # Increased sensitivity
+    exponential_penalty = torch.exp(-scaled_error / error_temperature)
+
+    # Modified threshold for success bonus to be more achievable
+    bonus_threshold: float = 0.06  # Increased threshold closer to observed max values
+    success_bonus = torch.where(displacement_error < bonus_threshold,
+                                torch.tensor(1.0, device=current_palm_displacement.device),
+                                torch.tensor(0.0, device=current_palm_displacement.device))
+
+    # Rebalanced total reward with equal weighting to emphasize all components
+    total_reward = (exponential_penalty * 0.45 + success_bonus * 0.55)  # New weighting for better performance encouragement
+
+    reward_components: Dict[str, torch.Tensor] = {
+        "scaled_error": scaled_error,
+        "exponential_penalty": exponential_penalty,
+        "success_bonus": success_bonus,
+        "total_reward": total_reward
+    }
+    
     return total_reward, reward_components

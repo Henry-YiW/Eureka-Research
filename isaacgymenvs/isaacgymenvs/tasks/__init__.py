@@ -70,6 +70,7 @@ from .shadow_hand_swing_cup import ShadowHandSwingCup
 from .shadow_hand_switch import ShadowHandSwitch
 from .shadow_hand_two_catch_underarm import ShadowHandTwoCatchUnderarm
 from .shadow_hand_rope import ShadowHandRope
+from .ant_exp import AntExp
 
 # Mappings from strings to environments
 isaacgym_task_map = {
@@ -118,5 +119,6 @@ isaacgym_task_map = {
     "ShadowHandSwingCup": ShadowHandSwingCup,
     "ShadowHandSwitch": ShadowHandSwitch,
     "ShadowHandTwoCatchUnderarm": ShadowHandTwoCatchUnderarm,
+    "AntExp": AntExp,
 }
 
