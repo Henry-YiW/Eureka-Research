@@ -29,6 +29,8 @@
 import numpy as np
 import os
 import torch
+import csv
+from datetime import datetime
 
 from isaacgym import gymtorch
 from isaacgym import gymapi
@@ -67,6 +69,18 @@ class AntExp(VecTask):
         self.cfg["env"]["numObservations"] = 60
         self.cfg["env"]["numActions"] = 8
 
+        # Setup logging
+        log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../logs')
+        os.makedirs(log_dir, exist_ok=True)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        self.log_file = os.path.join(log_dir, f'ant_contact_forces_{timestamp}.csv')
+        
+        # Create CSV file with headers
+        with open(self.log_file, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['Timestamp', 'Step', 'Foot', 'Force_X', 'Force_Y', 'Force_Z', 'Force_Magnitude', 
+                           'Torque_X', 'Torque_Y', 'Torque_Z'])
+
         super().__init__(config=self.cfg, rl_device=rl_device, sim_device=sim_device, graphics_device_id=graphics_device_id, headless=headless, virtual_screen_capture=virtual_screen_capture, force_render=force_render)
 
         if self.viewer != None:
@@ -88,6 +102,12 @@ class AntExp(VecTask):
 
         self.root_states = gymtorch.wrap_tensor(actor_root_state)
         self.initial_root_states = self.root_states.clone()
+        # === Debug Print for __init__ ===
+        print(f"AntExp.__init__: self.initial_root_states.shape: {self.initial_root_states.shape}")
+        if self.num_envs > 0:
+            calculated_actors_per_env = self.initial_root_states.shape[0] / self.num_envs
+            print(f"AntExp.__init__: Calculated num_actors_per_env: {calculated_actors_per_env}")
+        # === End Debug Print ===
         self.initial_root_states[:, 7:13] = 0  # set lin_vel and ang_vel to 0
 
         # create some wrapper tensors for different slices
@@ -185,19 +205,6 @@ class AntExp(VecTask):
         self.dof_limits_lower = []
         self.dof_limits_upper = []
 
-        # === Add Wall Asset Setup ===
-        # Define a general asset root that points to the top-level 'assets' directory
-        general_asset_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../assets')
-
-        wall_asset_options = gymapi.AssetOptions()
-        wall_asset_options.fix_base_link = True
-        wall_asset_options.disable_gravity = True # Wall should be static
-        # Assuming 'cube_multicolor.urdf' is available in 'assets/urdf/objects/'
-        wall_asset_file = "urdf/objects/cube_multicolor.urdf" 
-        # Load wall asset using the general_asset_root
-        wall_asset = self.gym.load_asset(self.sim, general_asset_root, wall_asset_file, wall_asset_options)
-        # === End Wall Asset Setup ===
-
         for i in range(self.num_envs):
             # create env instance
             env_ptr = self.gym.create_env(
@@ -211,22 +218,6 @@ class AntExp(VecTask):
 
             self.envs.append(env_ptr)
             self.ant_handles.append(ant_handle)
-
-            # === Add Wall Actor to Each Env ===
-            wall_pose = gymapi.Transform()
-            # Position the wall in front of the Ant's typical starting direction (positive X)
-            # Ant starts near (0,0,0.44). Wall at x=1.5, centered in y, base at z=0.
-            wall_pose.p = gymapi.Vec3(1.5, 0, 0.5) # Center of the wall base
-            wall_handle = self.gym.create_actor(env_ptr, wall_asset, wall_pose, f"wall_{i}", i, 0, 0) # Collision group 0
-            
-            # Scale the wall to be thin, wide, and tall
-            # Assuming the base cube asset is 0.1x0.1x0.1 or similar, this makes it:
-            # X (thickness): 0.1 * 1.0 = 0.1m
-            # Y (width):   0.1 * 20.0 = 2.0m
-            # Z (height):  0.1 * 10.0 = 1.0m
-            self.gym.set_actor_scale(env_ptr, wall_handle, 1.0)  # or some other float
-
-            # === End Add Wall Actor ===
 
         dof_prop = self.gym.get_actor_dof_properties(env_ptr, ant_handle)
         for j in range(self.num_dof):
@@ -289,6 +280,7 @@ class AntExp(VecTask):
         self.dof_pos[env_ids] = tensor_clamp(self.initial_dof_pos[env_ids] + positions, self.dof_limits_lower, self.dof_limits_upper)
         self.dof_vel[env_ids] = velocities
 
+        # Convert env_ids to int32 for the API
         env_ids_int32 = env_ids.to(dtype=torch.int32)
 
         self.gym.set_actor_root_state_tensor_indexed(self.sim,
@@ -299,6 +291,7 @@ class AntExp(VecTask):
                                               gymtorch.unwrap_tensor(self.dof_state),
                                               gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
 
+        # Use env_ids directly since there's only one actor (ant) per environment now
         to_target = self.targets[env_ids] - self.initial_root_states[env_ids, 0:3]
         to_target[:, 2] = 0.0
         self.prev_potentials[env_ids] = -torch.norm(to_target, p=2, dim=-1) / self.dt
@@ -345,22 +338,43 @@ class AntExp(VecTask):
 
             self.gym.add_lines(self.viewer, None, self.num_envs * 2, points, colors)
 
-        # === Sensor Logging for Experiment ===
-        # Log sensor data for the first environment (env 0) every 10 steps
+        # === Contact Force Logging ===
+        # Log contact force data for each foot every 10 steps
         if self.progress_buf[0] % 10 == 0 and self.num_envs > 0:
-            print(f"--- Step {self.progress_buf[0].item()} ---")
-            for foot_idx in range(self.sensors_per_env): # Iterate through the 4 foot sensors
-                sensor_data_start_idx = foot_idx * 6
-                sensor_data_end_idx = sensor_data_start_idx + 6
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
+            current_step = self.progress_buf[0].item()
+            foot_names = ["front_left", "front_right", "back_left", "back_right"]
+            
+            # Prepare data for logging
+            log_data = []
+            for foot_idx in range(self.sensors_per_env):
+                sensor_offset = foot_idx * 6
                 
-                # Get the 6D force-torque vector for the current foot sensor in env 0
-                foot_sensor_readings = self.vec_sensor_tensor[0, sensor_data_start_idx:sensor_data_end_idx].cpu().numpy()
+                # Extract force and torque components
+                force = self.vec_sensor_tensor[0, sensor_offset:sensor_offset+3].cpu().numpy()
+                torque = self.vec_sensor_tensor[0, sensor_offset+3:sensor_offset+6].cpu().numpy()
+                force_magnitude = np.linalg.norm(force)
                 
-                Fx, Fy, Fz = foot_sensor_readings[0], foot_sensor_readings[1], foot_sensor_readings[2]
-                Tx, Ty, Tz = foot_sensor_readings[3], foot_sensor_readings[4], foot_sensor_readings[5]
-                
-                print(f"Env 0, Foot {foot_idx} Sensor: Fx={Fx:.3f}, Fy={Fy:.3f}, Fz={Fz:.3f}, Tx={Tx:.3f}, Ty={Ty:.3f}, Tz={Tz:.3f}")
-        # === End Sensor Logging ===
+                # Create log entry
+                log_entry = [
+                    timestamp,
+                    current_step,
+                    foot_names[foot_idx],
+                    f"{force[0]:.6f}",
+                    f"{force[1]:.6f}",
+                    f"{force[2]:.6f}",
+                    f"{force_magnitude:.6f}",
+                    f"{torque[0]:.6f}",
+                    f"{torque[1]:.6f}",
+                    f"{torque[2]:.6f}"
+                ]
+                log_data.append(log_entry)
+            
+            # Write to CSV file
+            with open(self.log_file, 'a', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerows(log_data)
+        # === End Contact Force Logging ===
 
 @torch.jit.script
 def compute_ant_observations(obs_buf, root_states, targets, potentials,
