@@ -3,6 +3,8 @@
 import numpy as np
 import os
 import torch
+import csv
+from datetime import datetime
 
 from isaacgym import gymtorch
 from isaacgym import gymapi
@@ -19,6 +21,18 @@ class ShadowHandRope(VecTask):
     def __init__(self, cfg, rl_device, sim_device, graphics_device_id, headless, virtual_screen_capture, force_render):
 
         self.cfg = cfg
+
+        # Setup logging
+        log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../logs')
+        os.makedirs(log_dir, exist_ok=True)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        self.log_file = os.path.join(log_dir, f'shadow_hand_contact_forces_{timestamp}.csv')
+        
+        # Create CSV file with headers
+        with open(self.log_file, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['Timestamp', 'Step', 'Fingertip', 'Force_X', 'Force_Y', 'Force_Z', 'Force_Magnitude', 
+                           'Torque_X', 'Torque_Y', 'Torque_Z'])
 
         self.randomize = self.cfg["task"]["randomize"]
         if self.randomize:
@@ -735,9 +749,45 @@ class ShadowHandRope(VecTask):
             self.randomize_buf += 1
 
         self.compute_observations()
-        self.compute_reward(self.actions) # Compute placeholder reward
+        self.compute_reward(self.actions)
 
-        # Debug visualization (optional)
+        # === Contact Force Logging ===
+        # Log contact force data for each fingertip every 10 steps
+        if self.progress_buf[0] % 10 == 0 and self.num_envs > 0:
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
+            current_step = self.progress_buf[0].item()
+            
+            # Prepare data for logging
+            log_data = []
+            for finger_idx in range(self.num_fingertips):
+                sensor_offset = finger_idx * 6  # Each sensor has 6 values (3 force, 3 torque)
+                
+                # Extract force and torque components for the first environment (env_id=0)
+                force = self.vec_sensor_tensor[0, sensor_offset:sensor_offset+3].cpu().numpy()
+                torque = self.vec_sensor_tensor[0, sensor_offset+3:sensor_offset+6].cpu().numpy()
+                force_magnitude = np.linalg.norm(force)
+                
+                # Create log entry
+                log_entry = [
+                    timestamp,
+                    current_step,
+                    self.fingertips[finger_idx],  # Use the actual fingertip name
+                    f"{force[0]:.6f}",
+                    f"{force[1]:.6f}",
+                    f"{force[2]:.6f}",
+                    f"{force_magnitude:.6f}",
+                    f"{torque[0]:.6f}",
+                    f"{torque[1]:.6f}",
+                    f"{torque[2]:.6f}"
+                ]
+                log_data.append(log_entry)
+            
+            # Write to CSV file
+            with open(self.log_file, 'a', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerows(log_data)
+        # === End Contact Force Logging ===
+
         if self.viewer and self.debug_viz:
             self.gym.clear_lines(self.viewer)
             self.gym.refresh_rigid_body_state_tensor(self.sim)
