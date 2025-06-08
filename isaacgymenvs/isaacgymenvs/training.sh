@@ -17,7 +17,7 @@
 
 export LD_LIBRARY_PATH=/scratch/bdes/haorany7/anaconda3/envs/eureka/lib:$LD_LIBRARY_PATH
 # Configuration
-TASK="AntExp"
+TASK="ShadowHandRope"
 HEADLESS="True"  # Set to "False" for visualization
 FORCE_RENDER="False"
 NUM_ENVS=8192     # Number of parallel environments
