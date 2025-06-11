@@ -59,6 +59,9 @@ def preprocess_train_config(cfg, config_dict):
     train_cfg = config_dict['params']['config']
     train_cfg['full_experiment_name'] = cfg.get('full_experiment_name')
 
+    if cfg.headless is False:
+        train_cfg.setdefault('player', {})['render'] = True
+
     try:
         model_size_multiplier = config_dict['params']['network']['mlp']['model_size_multiplier']
         if model_size_multiplier != 1:

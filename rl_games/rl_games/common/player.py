@@ -72,18 +72,24 @@ class BasePlayer(object):
         builder = model_builder.ModelBuilder()
         self.config['network'] = builder.load(params)
 
-    def _preproc_obs(self, obs_batch):
-        if type(obs_batch) is dict:
-            obs_batch = copy.copy(obs_batch)
-            for k, v in obs_batch.items():
-                if v.dtype == torch.uint8:
-                    obs_batch[k] = v.float() / 255.0
+    def _preproc_obs(self, obs):
+        if self.is_tensor_obses:
+            return obs
+        if isinstance(obs, dict):
+            for k,v in obs.items():
+                if isinstance(v, torch.Tensor):
+                    obs[k] = v.to(self.device)
                 else:
-                    obs_batch[k] = v
+                    obs[k] = torch.from_numpy(v).to(self.device)
+            return obs
+        if hasattr(obs, 'dtype') and obs.dtype == np.float64:
+            obs = obs.astype(np.float32)
+        if len(obs.shape) == self.observation_space_len:
+            obs = torch.from_numpy(obs).unsqueeze(0).to(self.device)
         else:
-            if obs_batch.dtype == torch.uint8:
-                obs_batch = obs_batch.float() / 255.0
-        return obs_batch
+            if obs.dtype == torch.uint8:
+                obs = obs.float() / 255.0
+        return obs
 
     def env_step(self, env, actions):
         if not self.is_tensor_obses:
