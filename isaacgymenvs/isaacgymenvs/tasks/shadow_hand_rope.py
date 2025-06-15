@@ -303,9 +303,11 @@ class ShadowHandRope(VecTask):
         shadow_hand_start_pose.p = gymapi.Vec3(0.0, 0.0, 0.5)
 
         rope_start_pose = gymapi.Transform()
-        # Adjust position to be in front of palm rather than at the end
-        # Move it forward (less negative y) and slightly higher z for better initial grasp position
-        rope_start_pose.p = shadow_hand_start_pose.p + gymapi.Vec3(0.0, -0.2, 0.15)
+        # Position the rope within the hand's grasp:
+        # - Slightly in front (small negative y)
+        # - At palm level (same z as hand + small offset)
+        # - Centered in x
+        rope_start_pose.p = shadow_hand_start_pose.p + gymapi.Vec3(0.0, -0.40, 0.04)
         
         # First rotation: 90 degrees around X-axis to make it parallel to ground
         angle_x = np.pi / 2.0
@@ -803,10 +805,50 @@ class ShadowHandRope(VecTask):
         if self.viewer and self.debug_viz:
             self.gym.clear_lines(self.viewer)
             self.gym.refresh_rigid_body_state_tensor(self.sim)
-            # Add visualization for rope if needed
-            # ... similar to goal visualization in Spin task ...
 
-    
+            # Draw target visualization for the first environment
+            # Get rope position and orientation
+            rope_pos = self.rope_pos[0]  # Use first environment
+            rope_rot = self.rope_rot[0]
+            
+            # Get the rope's y-axis in world space (the axis along its length)
+            rope_y_axis_world = quat_apply(rope_rot, self.local_y_axis[0])
+            
+            # Calculate target positions along the rope axis
+            target_pos = rope_pos + rope_y_axis_world * self.target_displacement[0]
+            tolerance_pos_plus = target_pos + rope_y_axis_world * self.success_tolerance
+            tolerance_pos_minus = target_pos - rope_y_axis_world * self.success_tolerance
+            
+            # Colors for visualization
+            red = gymapi.Vec3(1.0, 0.0, 0.0)      # Target position
+            green = gymapi.Vec3(0.0, 1.0, 0.0)    # Success tolerance bounds
+            blue = gymapi.Vec3(0.0, 0.0, 1.0)     # Current position marker
+            
+            # Draw target position (red sphere)
+            p1 = gymapi.Vec3(target_pos[0], target_pos[1], target_pos[2])
+            p2 = gymapi.Vec3(target_pos[0] + 0.02, target_pos[1], target_pos[2])  # Small offset for visibility
+            self.gym.add_lines(self.viewer, self.envs[0], 1, [p1.x, p1.y, p1.z, p2.x, p2.y, p2.z], [red.x, red.y, red.z])
+            
+            # Draw tolerance bounds (green spheres)
+            p1 = gymapi.Vec3(tolerance_pos_plus[0], tolerance_pos_plus[1], tolerance_pos_plus[2])
+            p2 = gymapi.Vec3(tolerance_pos_plus[0] + 0.02, tolerance_pos_plus[1], tolerance_pos_plus[2])
+            self.gym.add_lines(self.viewer, self.envs[0], 1, [p1.x, p1.y, p1.z, p2.x, p2.y, p2.z], [green.x, green.y, green.z])
+            
+            p1 = gymapi.Vec3(tolerance_pos_minus[0], tolerance_pos_minus[1], tolerance_pos_minus[2])
+            p2 = gymapi.Vec3(tolerance_pos_minus[0] + 0.02, tolerance_pos_minus[1], tolerance_pos_minus[2])
+            self.gym.add_lines(self.viewer, self.envs[0], 1, [p1.x, p1.y, p1.z, p2.x, p2.y, p2.z], [green.x, green.y, green.z])
+            
+            # Draw current palm position (blue sphere)
+            palm_pos = self.rigid_body_states[:, self.palm_handle][:, 0:3][0]  # Use first environment
+            p1 = gymapi.Vec3(palm_pos[0], palm_pos[1], palm_pos[2])
+            p2 = gymapi.Vec3(palm_pos[0] + 0.02, palm_pos[1], palm_pos[2])
+            self.gym.add_lines(self.viewer, self.envs[0], 1, [p1.x, p1.y, p1.z, p2.x, p2.y, p2.z], [blue.x, blue.y, blue.z])
+
+            # Draw line from rope center to target (yellow line)
+            yellow = gymapi.Vec3(1.0, 1.0, 0.0)
+            p1 = gymapi.Vec3(rope_pos[0], rope_pos[1], rope_pos[2])
+            p2 = gymapi.Vec3(target_pos[0], target_pos[1], target_pos[2])
+            self.gym.add_lines(self.viewer, self.envs[0], 1, [p1.x, p1.y, p1.z, p2.x, p2.y, p2.z], [yellow.x, yellow.y, yellow.z])
 
 
 @torch.jit.script

@@ -2,7 +2,7 @@ import torch
 import os # Import os to check if file exists
 
 # --- UPDATE THIS LINE WITH THE CORRECT RELATIVE PATH ---
-checkpoint_path = 'outputs/eureka/2025-05-12_04-07-53/policy-2025-05-12_05-05-34/runs/AntGPT-2025-05-12_05-05-35/nn/last_AntGPT_ep_3000.pth'
+checkpoint_path = '/home/jensenyuan/Projects/Eureka-Research/eureka/checkpoints/iter7_response0_ShadowHandRopeGPT_ep_3000.pth'
 # -----------------------------------------------------
 
 print(f"Attempting to load: {checkpoint_path}")
