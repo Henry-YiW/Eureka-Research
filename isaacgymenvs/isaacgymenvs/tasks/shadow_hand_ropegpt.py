@@ -648,28 +648,28 @@ import torch
 from torch import Tensor
 @torch.jit.script
 def compute_reward(current_palm_displacement: torch.Tensor, target_displacement: torch.Tensor) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
-    # New adjustment to error scaling for finer control
-    displacement_error = torch.abs(current_palm_displacement - target_displacement)
-    scaled_error = displacement_error * 0.7  # Reduced influence for minor adjustment
+    # Adjusted temperature parameters
+    temp_displacement: float = 0.1  # Sharper response as per analysis
+    temp_stabilization: float = 0.05  # Encourage smaller errors more strongly
 
-    # Sharpened penalty for deviations from the target
-    error_temperature: float = 0.02  # Increased sensitivity
-    exponential_penalty = torch.exp(-scaled_error / error_temperature)
+    # Calculate the displacement error
+    displacement_error: torch.Tensor = torch.abs(current_palm_displacement - target_displacement)
+    
+    # Exponential reward for minimizing displacement error
+    exp_reward: torch.Tensor = torch.exp(-displacement_error / temp_displacement)
 
-    # Modified threshold for success bonus to be more achievable
-    bonus_threshold: float = 0.06  # Increased threshold closer to observed max values
-    success_bonus = torch.where(displacement_error < bonus_threshold,
-                                torch.tensor(1.0, device=current_palm_displacement.device),
-                                torch.tensor(0.0, device=current_palm_displacement.device))
+    # New stabilization bonus: more significant reward as displacement error approaches zero
+    stabilization_bonus: torch.Tensor = torch.exp(-displacement_error / temp_stabilization)
 
-    # Rebalanced total reward with equal weighting to emphasize all components
-    total_reward = (exponential_penalty * 0.45 + success_bonus * 0.55)  # New weighting for better performance encouragement
+    # Combine and scale components of the reward; re-balanced to emphasize the stabilization
+    total_reward: torch.Tensor = 0.7 * exp_reward + 0.3 * stabilization_bonus
 
+    # Collecting information for debugging and tuning
     reward_components: Dict[str, torch.Tensor] = {
-        "scaled_error": scaled_error,
-        "exponential_penalty": exponential_penalty,
-        "success_bonus": success_bonus,
+        "displacement_error": displacement_error,
+        "exp_reward": exp_reward,
+        "stabilization_bonus": stabilization_bonus,
         "total_reward": total_reward
     }
-    
-    return total_reward, reward_components
+
+    return torch.mean(total_reward), reward_components
