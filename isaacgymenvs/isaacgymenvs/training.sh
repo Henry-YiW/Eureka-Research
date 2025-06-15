@@ -15,12 +15,12 @@
 #SBATCH -e slurm-%j.err
 #SBATCH -o slurm-%j.out
 
-export LD_LIBRARY_PATH=/scratch/bdes/haorany7/anaconda3/envs/eureka/lib:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=/home/jensenyuan/miniconda3/envs/eureka/lib:$LD_LIBRARY_PATH
 # Configuration
 TASK="ShadowHandRope"
-HEADLESS="True"  # Set to "False" for visualization
-FORCE_RENDER="False"
-NUM_ENVS=8192     # Number of parallel environments
+HEADLESS="False"  # Set to "False" for visualization
+FORCE_RENDER="True"
+NUM_ENVS=1024     # Number of parallel environments
 MAX_ITERATIONS=3000  # Total training iterations
 
 

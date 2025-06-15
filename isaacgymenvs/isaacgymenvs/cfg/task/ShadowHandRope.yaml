@@ -62,6 +62,8 @@ env:
   # set to True if you use camera sensors in the environment
   enableCameraSensors: False
 
+  targetDisplacementPositive: 0.2  # or whatever value you want
+
 task:
   randomize: False # Set to True to enable randomization
   # --- START DIAGNOSTIC EDIT ---
